@@ -29,7 +29,7 @@
             <br :key="index"/>
           </template>
         </div>
-        <a :href="info.source_url" target="_blank" class="source">
+        <a :href="info.download_url" target="_blank" class="source">
           <img v-if="info.source_img_url" :src="info.source_img_url" />
           <span>资源来源于{{info.source_name}}</span>
         </a>

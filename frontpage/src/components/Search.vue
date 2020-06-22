@@ -83,10 +83,10 @@ export default {
       result:null,
       presentKey:"",
       controller:null,
+      get_more_controller:null,
       searchText:"搜索中",
       searchTextClock:null,
-      searchLineFocus:false,
-      download_url:config.download_url
+      searchLineFocus:false
     }
   },
   watch:{
@@ -111,17 +111,13 @@ export default {
   },
   // 直接通过修改url进行搜索
   beforeRouteUpdate :function(to,from,next){
-    // console.log(to)
-    // console.log(from)
-    // console.log(this.$route)
-    // 从content跳转到search
+    // 从search跳转到content
     if(from.name=="search" && to.name=="content")
     {
       // 当前搜索结果与跳转页面的url一致，说明是通过搜索功能成功进行跳转的，不必再次搜索
-      // 还有一种可能就是从content路由返回到search路由
       if(this.presentKey == to.params.content)
         next();
-      // 否则说明是直接通过url更改进行的跳转，那么我们先搜索再看情况
+      // 否则说明是直接通过url更改进行的跳转，那么我们先搜索再看情况，包括前进后退引起的url更改
       else
       {
         this.content = to.params.content.trim();
@@ -138,13 +134,19 @@ export default {
       this.searching=false;
       this.content="";
       this.presentKey="";
+      if(this.get_more_controller != null)
+      {
+        this.get_more_controller.abort();
+        this.get_more_controller = null;
+      }
+      this.clearDownloading();
       this.result=null;
       this.searchText="搜索中";
       this.searchTextClock=null;
       next();
     }
     // 如果是content跳往content
-    if(to.name=="content" && from.name=="content")
+    else if(to.name=="content" && from.name=="content")
     {
       // 当前搜索结果与跳转页面的url一致，说明是通过搜索功能成功进行跳转的，不必再次搜索
       if(this.presentKey == to.params.content)
@@ -155,6 +157,11 @@ export default {
         this.content=to.params.content.trim();
         this.search();
       }
+    }
+    // 否则是search页面或者content页面与其他页面的互动
+    else
+    {
+      next();
     }
   },
   computed:{
@@ -205,6 +212,14 @@ export default {
       }).then((response) => {
         return response.json();
       }).then((json) => {
+        // 清除当前的下载进程
+        this.clearDownloading();
+        // 清除当前的搜索进程
+        if(this.get_more_controller != null)
+        {
+          this.get_more_controller.abort();
+          this.get_more_controller = null;
+        }
         this.searching = false;
         this.controller = null;
         // 根据返回结果的不同来设定result
@@ -220,6 +235,12 @@ export default {
         // 如果是手动终止，那么直接返回就好，注意这个一定要放在下面更改信息前面，否则手动终止完成就会直接判定为结束当前搜索
         if(error instanceof DOMException)
           return;
+        this.clearDownloading();
+        if(this.get_more_controller != null)
+        {
+          this.get_more_controller.abort();
+          this.get_more_controller = null;
+        }
         this.searching = false;
         this.controller = null;
         this.result = error;
@@ -243,52 +264,10 @@ export default {
         //       source_name:"笔趣看",
         //       source_url:"www.baidu.com",
         //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
-        //     },
-        //     {
-        //       name:"三国演义",
-        //       introduction:"三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义",
-        //       download_url:"www.baidu.com",
-        //       imageList:[
-        //         "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1592159453680&di=edb8f09c8fb193dbba6bde8dd6f24a6d&imgtype=0&src=http%3A%2F%2Fimage.gqjd.net%2Fimage%2F2009-12%2F72712457221.jpg",
-        //       ],
-        //       source_name:"笔趣看",
-        //       source_url:"www.baidu.com",
-        //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
-        //     },
-        //     {
-        //       name:"三国演义",
-        //       introduction:"三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义",
-        //       download_url:"www.baidu.com",
-        //       imageList:[],
-        //       source_name:"笔趣看",
-        //       source_url:"www.baidu.com",
-        //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
-        //     },
-        //     {
-        //       name:"三国演义",
-        //       introduction:"三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义",
-        //       download_url:"www.baidu.com",
-        //       imageList:[
-        //         "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1592159453680&di=edb8f09c8fb193dbba6bde8dd6f24a6d&imgtype=0&src=http%3A%2F%2Fimage.gqjd.net%2Fimage%2F2009-12%2F72712457221.jpg",
-        //       ],
-        //       source_name:"笔趣看",
-        //       source_url:"www.baidu.com",
-        //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
-        //     },
-        //     {
-        //       name:"三国演义",
-        //       introduction:"三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义",
-        //       download_url:"www.baidu.com",
-        //       imageList:[],
-        //       source_name:"笔趣看",
-        //       source_url:"www.baidu.com",
-        //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
         //     }
         //   ]
         // };
         this.presentKey = presentKey;
-        console.log(this.$route.params.content);
-        console.log(presentKey);
         if(!(this.$route.name == "content" && this.$route.params.content == presentKey))
           this.$router.push({name:"content",params:{content:this.presentKey}});
       });
@@ -296,37 +275,41 @@ export default {
     getMore:function(resolve){
       let regex = /.*csrftoken=([^;.]*).*$/; // 用于从cookie中匹配 csrftoken值
       let token = document.cookie.match(regex) === null ? null : document.cookie.match(regex)[1];
+      this.get_more_controller = new AbortController();
       fetch(config.search_more,{
         method:"POST",
         headers:{
           "X-CSRFToken":token
         },
         credentials: "include",
-      }).then(response => response.json()).then(
-        json => {
-          if(json.status == config.success)
-          {
-            this.result.end = json.result.end;
-            if(json.result.content.length > 0)
-              this.result.content = this.result.content.concat(json.result.content);
-            else
-              this.$Message.info({
-                content:"已加载全部信息",
-                duration:2
-              });
-          }
+        signal:this.get_more_controller.signal
+      }).then(response => response.json()).then(json => {
+        if(json.status == config.success)
+        {
+          this.result.end = json.result.end;
+          if(json.result.content.length > 0)
+            this.result.content = this.result.content.concat(json.result.content);
           else
-            this.$Message.error({
-              content:"加载失败:" + json.information,
+            this.$Message.info({
+              content:"已加载全部信息",
               duration:2
             });
         }
-      ).catch(error => {
+        else
+          this.$Message.error({
+            content:"加载失败:" + json.information,
+            duration:2
+          });
+      }).catch(error => {
+        // 如果手动终止那么不提示
+        if(error instanceof DOMException)
+          return;
         this.$Message.error({
           content:"加载失败:" + error,
           duration:2
         });
       }).finally(()=>{
+        this.get_more_controller = null;
         resolve();
       });
     },
@@ -339,10 +322,12 @@ export default {
     download_file:function(order){
       let formData = new FormData();
       formData.append("url",this.result.content[order].download_url);
+      this.result.content[order].controller = new AbortController();
       let promise = new Promise((resolve,reject) => {
         fetch(config.downloaded,{
           method:"POST",
-          body:formData
+          body:formData,
+          signal:this.result.content[order].controller.signal
         }).then(response => response.json()).then(json => {
           if(json.status == config.success) 
             resolve(json);
@@ -355,7 +340,7 @@ export default {
       promise.then(json => {
         // 如果没有返回进度，那么1s之后再次询问
         if(json.percent == false) {
-          setTimeout(()=>{
+          this.result.content[order].download_timeout = setTimeout(()=>{
             this.download_file(order);
           },1000);
         }
@@ -370,14 +355,16 @@ export default {
           }
           this.$set(this.result.content[order],"process",Math.ceil((Number(time_node[1]) - Number(time_node[0]))*0.3));
           this.reduce_process(order);
-          setTimeout(()=>{
+          this.result.content[order].download_timeout = setTimeout(()=>{
             this.download_file(order)
           },time_interval);
         }
         else {
           let url = json.result;
+          this.result.content[order].controller = new AbortController();
           fetch(url,{
-            method:"GET"
+            method:"GET",
+            signal:this.result.content[order].controller.signal
           }).then(res => res.blob()).then(blob => {
             let filename = this.result.content[order].name + ".txt";
             let a = document.createElement('a');
@@ -390,8 +377,11 @@ export default {
             a.remove();
             window.URL.revokeObjectURL(url);
           }).catch(error => {
+            // 如果是手动终止，那么不会发生任何事情
+            if(error instanceof DOMException)
+              return;
             this.$Message.error({
-              content:"加载失败:" + error,
+              content:"下载失败:" + error,
               duration:2
             });
           }).finally(() => {
@@ -402,11 +392,15 @@ export default {
             }
             this.$set(this.result.content[order],"downloading",false);
             this.$set(this.result.content[order],"process",undefined);
+            this.result.content[order].controller = undefined;
           });
         }
       }).catch(error => {
+        // 如果是手动终止，那么不会发生任何事情
+        if(error instanceof DOMException)
+          return;
         this.$Message.error({
-          content:"加载失败:" + error,
+          content:"下载失败:" + error,
           duration:2
         });
         if(this.result.content[order].reduce_time_out != undefined)
@@ -416,6 +410,7 @@ export default {
         }
         this.$set(this.result.content[order],"downloading",false);
         this.$set(this.result.content[order],"process",undefined);
+        this.result.content[order].controller = undefined;
       });
     },
     // 定时减少秒数，但是不会减到1以下
@@ -432,6 +427,21 @@ export default {
         this.result.content[order].process -= 1
         this.reduce_process(order)
       },1000);
+    },
+    clearDownloading:function(){
+      // 这里需要把所有正在下载的信息清空
+      if(typeof(this.result)=="object" && !(this.result instanceof Error) && this.result != null && this.result.content != undefined)
+        for(let line of this.result.content)
+        {
+          if(line.reduce_time_out != undefined)
+            clearTimeout(line.reduce_time_out);
+          if(line.download_timeout != undefined)
+            clearTimeout(line.download_timeout);
+          if(line.controller != undefined)
+            line.controller.abort();
+          line.process = undefined;
+          line.downloading = false;
+        }
     }
   },
   provide:function(){

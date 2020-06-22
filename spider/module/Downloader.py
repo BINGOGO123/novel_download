@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from config.logger import logger_spider
 from config.config import redis_connect
+import ipdb
 
 class Downloader:
   __headers = {
@@ -11,6 +12,7 @@ class Downloader:
     logger_spider.debug("Downloader")
     self.s = requests.Session()
     self.s.headers.update(self.__headers)
+    self.connect = redis_connect.getConnect()
 
   # 根据搜索内容下载小说目录
   def download_catalog(self,names,filter="all"):
@@ -21,7 +23,8 @@ class Downloader:
     except AttributeError:
       logger_spider.exception("download_catalog {}不存在".format(funname))
       return False
-    return download_fun(names)
+    result = download_fun(names)
+    return result
 
   # 下载biqukan网站小说目录
   def download_catalog_biqukan(self,names):
@@ -39,7 +42,7 @@ class Downloader:
       response = self.s.get(download_url)
       response.raise_for_status()
     except:
-      logger_spider.exception("download_catalog_biqukan status_code={} 会话错误".format(response.status_code))
+      logger_spider.exception("download_catalog_biqukan url={} status_code={} 会话错误".format(download_url,response.status_code))
       return False
     content = response.text
     html = BeautifulSoup(content,"lxml")
@@ -143,7 +146,6 @@ class Downloader:
           download_list.append(item)
 
     novel_contents = ""
-    connect = redis_connect.getConnect()
     length = len(download_list)
     # 准备每章节进行下载
     for index in range(length):
@@ -151,7 +153,7 @@ class Downloader:
       logger_spider.debug("当前下载：{} url={}".format(download_info["content"],url))
       # 每下载30章就向redis数据库中更新一次进度
       if index % 30 == 0:
-        connect.set(url,"{}/{}".format(index,length))
+        self.connect.set(url,"{}/{}".format(index,length))
       try:
         response = self.s.get(download_info["url"])
         response.raise_for_status()
@@ -172,5 +174,5 @@ class Downloader:
       except:
         logger_spider.exception("download_novel_biqukan beautifulsoup_to_content_error")
     # 最后删掉url
-    connect.delete(url)
+    self.connect.delete(url)
     return novel_contents,novel_name

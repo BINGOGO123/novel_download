@@ -28,6 +28,8 @@ class DownloadCache(models.Model):
   downloaded = models.BooleanField(default=False)
   # 标记是否出现错误
   download_error = models.BooleanField(default=False)
+  # 记录错误信息，可以没有
+  download_error_info = models.CharField(max_length=128,blank=True,null=True)
   date_time = models.DateTimeField(auto_now=True)
   
   def __str__(self):

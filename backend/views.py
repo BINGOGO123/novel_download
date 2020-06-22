@@ -97,21 +97,31 @@ def search(request):
   content = get_exist_search_result(names)
   if not content:
     content = search_novel(names)
-    save_search_result(names,content)
+  if (type(content) == list or type(content) == tuple) and len(content) > 1 and content[0] == False:
+    # 这种情况下说明有错误信息
+    return JsonResponse({
+      "status":ERROR,
+      "information":content[1]
+    })
   if content == False:
     return JsonResponse({
       "status":ERROR,
       "information":"服务器错误"
     })
+  # 保存结果到搜索缓存中
+  save_search_result(names,content)
 
   # 说明没有信息，直接返回
   if (type(content) != list and type(content) != tuple) or len(content) <= 0:
     length = len(image_list)
     order = math.floor(random.random() * length)
-    return {
-      "empty":True,
-      "url":image_list[order]
-    }
+    return JsonResponse({
+      "status":SUCCESS,
+      "result":{
+        "empty":True,
+        "url":image_list[order]
+      }
+    })
 
   content_return = content[:20]
   content_save = content[20:]
@@ -224,9 +234,10 @@ def downloaded(request):
       "percent":percent
     })
   if download_cache.download_error == True:
+    information = download_cache.download_error_info if download_cache.download_error_info != None else "下载出现错误"
     return JsonResponse({
       "status":ERROR,
-      "information":"下载出现错误"
+      "information":information
     })
   download_url = request.build_absolute_uri(settings.MEDIA_URL + download_cache.data.name)
   return JsonResponse({
@@ -239,7 +250,11 @@ def download(url):
   download_cache = DownloadCache(url=url,downloaded=False,download_error=False)
   download_cache.save()
   content= download_novel(url)
-  if content == False:
+  if (type(content) == list or type(content) == tuple) and len(content) > 1 and content[0] == False:
+    # 这种情况下说明有错误信息
+    download_cache.download_error = True
+    download_cache.download_error_info = content[1]
+  elif content == False:
     download_cache.download_error = True
   else:
     # 对下载到的内容采用utf8进行编码
