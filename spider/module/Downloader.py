@@ -8,6 +8,8 @@ class Downloader:
   __headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.129 Safari/537.36"
   }
+  __max_download_count = 5
+  __timeout = 10
   def __init__(self):
     logger_spider.debug("Downloader")
     self.s = requests.Session()
@@ -38,11 +40,9 @@ class Downloader:
       logger_spider.error("download_catalog_biqukan names格式错误 names={}".format(names))
       return False
     # 开始下载网页
-    try:
-      response = self.s.get(download_url)
-      response.raise_for_status()
-    except:
-      logger_spider.exception("download_catalog_biqukan url={} status_code={} 会话错误".format(download_url,response.status_code))
+    response = self.download_html(download_url)
+    if response == False:
+      logger_spider.error("download_catalog_biqukan 搜索下载目录失败 url={}".format(download_url))
       return False
     content = response.text
     html = BeautifulSoup(content,"lxml")
@@ -57,8 +57,9 @@ class Downloader:
         item["name"] = str(span[1].string).strip()
         try:
           item["download_url"] = span[1].a.attrs["href"]
-          response_novel = self.s.get(item["download_url"])
-          response_novel.raise_for_status()
+          response_novel = self.download_html(item["download_url"])
+          if response_novel == False:
+            raise Exception("下载小说详细页面失败 url={}".format(item["download_url"]))
           novel_html = BeautifulSoup(response_novel.content.decode("gbk","replace"),"lxml")
           img_url = "https://www.biqukan.com" + novel_html.select_one(".cover img").attrs["src"]
           item["imageList"] = [img_url]
@@ -113,11 +114,9 @@ class Downloader:
   # 下载biqukan网站小说内容
   def download_novel_biqukan(self,url):
     logger_spider.debug("download_novel_biqukan url={}".format(url))
-    try:
-      response = self.s.get(url)
-      response.raise_for_status()
-    except:
-      logger_spider.exception("download_novel_biqukan status_code={} 会话错误".format(response.status_code))
+    response = self.download_html(url)
+    if response == False:
+      logger_spider.exception("download_novel_biqukan 下载目录页面失败 url={}".format(url))
       return False
     html = BeautifulSoup(response.content.decode("gbk","replace"),"lxml")
     # 名称
@@ -150,29 +149,44 @@ class Downloader:
     # 准备每章节进行下载
     for index in range(length):
       download_info = download_list[index]
-      logger_spider.debug("当前下载：{} url={}".format(download_info["content"],url))
+      logger_spider.debug("当前下载：{} 主页={} 章节={}".format(download_info["content"],url,download_info["url"]))
       # 每下载30章就向redis数据库中更新一次进度
       if index % 30 == 0:
         self.connect.set(url,"{}/{}".format(index,length))
-      try:
-        response = self.s.get(download_info["url"])
-        response.raise_for_status()
-      except:
-        logger_spider.exception("download_novel_biqukan download_url={} status_code={} 会话错误".format(download_info["url"],response.status_code))
-        # 这一章直接掠过
-        continue
-
-      try:
-        html = BeautifulSoup(response.content.decode("gbk","replace"),"lxml")
-        content_div = html.select_one("#content")
-        scripts = content_div.find_all("script")
-        # 清除script标签的内容
-        for script in scripts:
-          script.clear()
-        contents = "\n".join([x for x in content_div.stripped_strings])
-        novel_contents = novel_contents + download_info["content"] + "\n" + contents + "\n"
-      except:
-        logger_spider.exception("download_novel_biqukan beautifulsoup_to_content_error")
+      response = self.download_html(download_info["url"])
+      if response == False:
+        logger_spider.exception("download_novel_biqukan 下载章节失败 url={}".format(download_info["url"]))
+        # 下载失败，那么在明文中做出标记
+        novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"因为不可控因素，该章节下载失败，敬请谅解","#" * 20)
+      else:
+        try:
+          html = BeautifulSoup(response.content.decode("gbk","replace"),"lxml")
+          content_div = html.select_one("#content")
+          scripts = content_div.find_all("script")
+          # 清除script标签的内容
+          for script in scripts:
+            script.clear()
+          contents = "\n".join([x for x in content_div.stripped_strings])
+          novel_contents = novel_contents + download_info["content"] + "\n" + contents + "\n\n"
+        except:
+          logger_spider.exception("download_novel_biqukan 使用beautifulsoup提取html信息失败")
+          novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"异常因素，该章节下载失败，请联系416778940@qq.com","#" * 20)
     # 最后删掉url
     self.connect.delete(url)
     return novel_contents,novel_name
+
+  def download_html(self,url):
+    remain_count = self.__max_download_count
+    while True:
+      try:
+        res = self.s.get(url,timeout=self.__timeout)
+        res.raise_for_status()
+        return res
+      except:
+        logger_spider.exception("download_html url={}".format(url))
+        remain_count -= 1
+        # 说明已经到达最大下载次数
+        if remain_count == 0:
+          logger_spider.error("达到最大下载次数 url = {}".format(url))
+          break
+    return False

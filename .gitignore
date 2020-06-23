@@ -1,5 +1,6 @@
 .vs
 .vscode
 __pycache__
+*.rdb
 
 剩下的问题.md
