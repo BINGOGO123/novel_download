@@ -31,7 +31,3 @@ blob或者text不能作为primary_key
 > 参考：<https://stackoverflow.com/questions/40646098/django-migration-error-with-mysql-blob-text-column-id-used-in-key-specificati>
 
 ### 还需解决的问题
-
-1. 下载失败的数据库记录要重新下载而不是直接返回失败
-   > 如果因为爬虫队列满了无法下载的小说，那么之后一直无法下载
-   > 如果因为下载过程中某些意外错误下载失败的小说，那么之后也是一直无法下载

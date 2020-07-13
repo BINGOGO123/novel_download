@@ -233,8 +233,10 @@ def downloaded(request):
       "status":SUCCESS,
       "percent":percent
     })
+  # 如果download_error=True，那么查询完成之后立刻删除这条记录，也就是下次下载会重新开始而不是直接判定为下载失败
   if download_cache.download_error == True:
     information = download_cache.download_error_info if download_cache.download_error_info != None else "下载出现错误"
+    download_cache.delete()
     return JsonResponse({
       "status":ERROR,
       "information":information
