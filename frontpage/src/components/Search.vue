@@ -59,7 +59,6 @@
         :result="result"
         :searchKey="presentKey"
         :searching="searching"
-        @getMore="getMore"
         ></router-view>
         <!-- <Link class="link"/> -->
       </div>
@@ -244,40 +243,20 @@ export default {
         this.searching = false;
         this.controller = null;
         this.result = error;
-        // this.result = {
-        //   empty:true,
-        //   url:"http://www.xinhuanet.com/video/2020-01/26/1210452637_15800000011261n.jpg"
-        // };
-        // this.result = {
-        //   empty:false,
-        //   end:false,
-        //   length:100,
-        //   content:[
-        //     {
-        //       name:"三国演义",
-        //       introduction:"三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义三国演义",
-        //       download_url:"www.baidu.com",
-        //       imageList:[
-        //         "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1592159453680&di=edb8f09c8fb193dbba6bde8dd6f24a6d&imgtype=0&src=http%3A%2F%2Fimage.gqjd.net%2Fimage%2F2009-12%2F72712457221.jpg",
-        //         "http://image.gqjd.net/image/2009-12/57295513513.jpg"
-        //       ],
-        //       source_name:"笔趣看",
-        //       source_url:"www.baidu.com",
-        //       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png"
-        //     }
-        //   ]
-        // };
         this.presentKey = presentKey;
         if(!(this.$route.name == "content" && this.$route.params.content == presentKey))
           this.$router.push({name:"content",params:{content:this.presentKey}});
       });
     },
-    getMore:function(resolve){
+    getMore:function(resolve,name){
       let regex = /.*csrftoken=([^;.]*).*$/; // 用于从cookie中匹配 csrftoken值
       let token = document.cookie.match(regex) === null ? null : document.cookie.match(regex)[1];
+      let formData = new FormData();
+      formData.append("name",name);
       this.get_more_controller = new AbortController();
       fetch(config.search_more,{
         method:"POST",
+        body:formData,
         headers:{
           "X-CSRFToken":token
         },
@@ -286,14 +265,42 @@ export default {
       }).then(response => response.json()).then(json => {
         if(json.status == config.success)
         {
-          this.result.end = json.result.end;
-          if(json.result.content.length > 0)
-            this.result.content = this.result.content.concat(json.result.content);
+          if(this.result instanceof Array)
+          {
+            let i = 0;
+            for(;i<this.result.length;i++)
+              if(this.result[i].source_name == json.result.source_name)
+              {
+                this.result[i].end = json.result.end;
+                if(json.result.content.length > 0)
+                  this.result[i].content = this.result[i].content.concat(json.result.content);
+                else
+                  this.$Message.info({
+                    content:"已加载全部信息",
+                    duration:2
+                  });
+                break;
+              }
+            if(i >= this.result.length)
+            {
+              this.$Message.error({
+                content:`${json.result.source_name}不存在`,
+                duration:2
+              });
+            }
+          }
+          // 对应于result只有一个搜索结果的情况，目前后端不会返回这样的结果
           else
-            this.$Message.info({
-              content:"已加载全部信息",
-              duration:2
-            });
+          {
+            this.result.end = json.result.end;
+            if(json.result.content.length > 0)
+              this.result.content = this.result.content.concat(json.result.content);
+            else
+              this.$Message.info({
+                content:"已加载全部信息",
+                duration:2
+              });
+          }
         }
         else
           this.$Message.error({
@@ -313,21 +320,46 @@ export default {
         resolve();
       });
     },
-    download:function(order){
+    download:function(source_name,order){
       // 表示该文件正在下载中
-      this.$set(this.result.content[order],"downloading",true);
-      // this.result.content[order].downloading = true;
-      this.download_file(order);
+      let operate_content;
+      if(this.result instanceof Array)
+      {
+        let i = 0;
+        for(;i<this.result.length;i++)
+          if(this.result[i].source_name == source_name)
+          {
+            operate_content = this.result[i].content[order];
+            break
+          }
+        // 找不到下载的资源名称
+        if(i >= this.result.length)
+        {
+          this.$Message.error({
+            content:`资源${source_name}不存在`,
+            duration:2
+          });
+          return;
+        }
+      }
+      else
+        operate_content = this.result.content[order];
+      this.$set(operate_content,"downloading",true);
+      this.download_file(operate_content);
+      // this.$set(this.result.content[order],"downloading",true);
+      // this.download_file(order);
     },
-    download_file:function(order){
+    download_file:function(operate_content){
       let formData = new FormData();
-      formData.append("url",this.result.content[order].download_url);
-      this.result.content[order].controller = new AbortController();
+      // formData.append("url",this.result.content[order].download_url);
+      // this.result.content[order].controller = new AbortController();
+      formData.append("url",operate_content.download_url);
+      operate_content.controller = new AbortController();
       let promise = new Promise((resolve,reject) => {
         fetch(config.downloaded,{
           method:"POST",
           body:formData,
-          signal:this.result.content[order].controller.signal
+          signal:operate_content.controller.signal
         }).then(response => response.json()).then(json => {
           if(json.status == config.success) 
             resolve(json);
@@ -340,33 +372,33 @@ export default {
       promise.then(json => {
         // 如果没有返回进度，那么1s之后再次询问
         if(json.percent == false) {
-          this.result.content[order].download_timeout = setTimeout(()=>{
-            this.download_file(order);
+          operate_content.download_timeout = setTimeout(()=>{
+            this.download_file(operate_content);
           },1000);
         }
         else if(typeof(json.percent)=="string") {
-          // 这里假设0.3s的时间爬取一章
+          // 这里假设0.25s的时间爬取一章
           let time_node = json.percent.split("/");
           let time_interval = (Number(time_node[1]) - Number(time_node[0])) * 250;
-          if(this.result.content[order].reduce_time_out != undefined)
+          if(operate_content.reduce_time_out != undefined)
           {
-            clearTimeout(this.result.content[order].reduce_time_out);
-            this.result.content[order].reduce_time_out = null;
+            clearTimeout(operate_content.reduce_time_out);
+            operate_content.reduce_time_out = null;
           }
-          this.$set(this.result.content[order],"process",Math.ceil((Number(time_node[1]) - Number(time_node[0]))*0.3));
-          this.reduce_process(order);
-          this.result.content[order].download_timeout = setTimeout(()=>{
-            this.download_file(order)
+          this.$set(operate_content,"process",Math.ceil((Number(time_node[1]) - Number(time_node[0]))*0.3));
+          this.reduce_process(operate_content);
+          operate_content.download_timeout = setTimeout(()=>{
+            this.download_file(operate_content)
           },time_interval);
         }
         else {
           let url = json.result;
-          this.result.content[order].controller = new AbortController();
+          operate_content.controller = new AbortController();
           fetch(url,{
             method:"GET",
-            signal:this.result.content[order].controller.signal
+            signal:operate_content.controller.signal
           }).then(res => res.blob()).then(blob => {
-            let filename = this.result.content[order].name + ".txt";
+            let filename = operate_content.name + ".txt";
             let a = document.createElement('a');
             document.body.appendChild(a);
             let url = window.URL.createObjectURL(blob); 
@@ -385,14 +417,14 @@ export default {
               duration:2
             });
           }).finally(() => {
-            if(this.result.content[order].reduce_time_out != undefined)
+            if(operate_content.reduce_time_out != undefined)
             {
-              clearTimeout(this.result.content[order].reduce_time_out);
-              this.result.content[order].reduce_time_out = null;
+              clearTimeout(operate_content.reduce_time_out);
+              operate_content.reduce_time_out = null;
             }
-            this.$set(this.result.content[order],"downloading",false);
-            this.$set(this.result.content[order],"process",undefined);
-            this.result.content[order].controller = undefined;
+            this.$set(operate_content,"downloading",false);
+            this.$set(operate_content,"process",undefined);
+            operate_content.controller = undefined;
           });
         }
       }).catch(error => {
@@ -403,34 +435,48 @@ export default {
           content:"下载失败:" + error,
           duration:2
         });
-        if(this.result.content[order].reduce_time_out != undefined)
+        if(operate_content.reduce_time_out != undefined)
         {
-          clearTimeout(this.result.content[order].reduce_time_out);
-          this.result.content[order].reduce_time_out = null;
+          clearTimeout(operate_content.reduce_time_out);
+          operate_content.reduce_time_out = null;
         }
-        this.$set(this.result.content[order],"downloading",false);
-        this.$set(this.result.content[order],"process",undefined);
-        this.result.content[order].controller = undefined;
+        this.$set(operate_content,"downloading",false);
+        this.$set(operate_content,"process",undefined);
+        operate_content.controller = undefined;
       });
     },
     // 定时减少秒数，但是不会减到1以下
-    reduce_process:function(order) {
-      if(this.result.content.legnth <= order | this.result.content[order].process == undefined)
+    reduce_process:function(operate_content) {
+      if(operate_content.process == undefined)
         return;
-      if(this.result.content[order].process <= 1)
+      if(operate_content.process <= 1)
       {
         // 先清除一下
-        this.result.content[order].reduce_time_out = undefined;
+        operate_content.reduce_time_out = undefined;
         return;
       }
-      this.result.content[order].reduce_time_out = setTimeout(()=>{
-        this.result.content[order].process -= 1
-        this.reduce_process(order)
+      operate_content.reduce_time_out = setTimeout(()=>{
+        operate_content.process -= 1
+        this.reduce_process(operate_content)
       },1000);
     },
     clearDownloading:function(){
       // 这里需要把所有正在下载的信息清空
-      if(typeof(this.result)=="object" && !(this.result instanceof Error) && this.result != null && this.result.content != undefined)
+      if(this.result instanceof Array)
+        for(let one_result of this.result)
+          if(one_result.content != undefined && one_result.content instanceof Array)
+            for(let line of one_result.content)
+            {
+              if(line.reduce_time_out != undefined)
+                clearTimeout(line.reduce_time_out);
+              if(line.download_timeout != undefined)
+                clearTimeout(line.download_timeout);
+              if(line.controller != undefined)
+                line.controller.abort();
+              line.process = undefined;
+              line.downloading = false;
+            }
+      else if(typeof(this.result) == "object" && !(this.result instanceof Error) && this.result !=null && this.result.content != undefined)
         for(let line of this.result.content)
         {
           if(line.reduce_time_out != undefined)
@@ -446,7 +492,8 @@ export default {
   },
   provide:function(){
     return {
-      download:this.download
+      download:this.download,
+      getMore:this.getMore
     }
   },
   components:{
@@ -603,7 +650,9 @@ $small-white:rgb(255, 255, 255);
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
+  // box-sizing: content-box;
   height:45px;
+  flex-shrink: 0;
   .logo
   {
     font-family: "Verdana",youyuan;
@@ -672,8 +721,6 @@ $small-white:rgb(255, 255, 255);
 {
   background-color:#F1F2F9;
   flex:1;
-  // margin-top:42px;
-  // margin-bottom:25px;
 }
 .top
 {

@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from config.logger import logger_spider
 from config.config import redis_connect
 import ipdb
+from config.config import SUCCESS,ERROR
 
 class Downloader:
   __headers = {
@@ -24,13 +25,19 @@ class Downloader:
       download_fun = getattr(self,funname)
     except AttributeError:
       logger_spider.exception("download_catalog {}不存在".format(funname))
-      return False
+      return False,"500错误"
     result = download_fun(names)
     return result
 
   # 下载biqukan网站小说目录
   def download_catalog_biqukan(self,names):
     logger_spider.debug("download_catalog_biqukan names={}".format(names))
+    # 返回的结果
+    return_result = {
+      "source_name":"笔趣看",
+      "source_url":"https://www.biqukan.com/",
+      "source_img_url":"https://www.biqukan.com/images/logo.png"
+    }
     home_url = "https://so.biqusoso.com/s.php?ie=utf-8&siteid=biqukan.com&q="
     if type(names) == str:
       download_url = home_url + names
@@ -38,12 +45,16 @@ class Downloader:
       download_url = home_url + "+".join(names)
     else:
       logger_spider.error("download_catalog_biqukan names格式错误 names={}".format(names))
-      return False
+      return_result["status"] = ERROR
+      return_result["information"] = "500错误"
+      return return_result
     # 开始下载网页
     response = self.download_html(download_url)
     if response == False:
       logger_spider.error("download_catalog_biqukan 搜索下载目录失败 url={}".format(download_url))
-      return False
+      return_result["status"] = ERROR
+      return_result["information"] = "服务器爬虫请求失败"
+      return return_result
     content = response.text
     html = BeautifulSoup(content,"lxml")
     # 不要第一行的标题
@@ -75,15 +86,14 @@ class Downloader:
         else:
           item["introduction"] = ["作者" + str(span[2].string).strip()]
       if item != {}:
-        item["source_name"]="笔趣看"
-        item["source_url"] = "https://www.biqukan.com/"
-        item["source_img_url"] = "https://www.biqukan.com/images/logo.png"
         result.append(item)
-    return result
+    return_result["status"] = SUCCESS
+    return_result["content"] = result
+    return return_result
 
   # 下载所有网址小说目录
   def download_catalog_all(self,names):
-    return self.download_catalog_biqukan(names)
+    return [self.download_catalog_biqukan(names)]
 
   # 判断一个网址应该用哪个下载器下载
   def judge_url(self,url):

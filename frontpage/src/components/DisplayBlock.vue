@@ -4,7 +4,7 @@
       <div class="title-line">
         <div class="title">{{info.name}}</div>
         <div class="button-div">
-          <button v-if="info.download_url" @click="download(order)" class="enter-button" :class="{downloading:downloading}" :disabled="downloading">
+          <button v-if="info.download_url" @click="download(source_name,order)" class="enter-button" :class="{downloading:downloading}" :disabled="downloading">
             <span class="enter" title="download" v-if="!downloading">
               <span>下载整本&nbsp;&nbsp;</span>
               <Icon class="icon" type="md-arrow-round-down" :size="20"/>
@@ -30,8 +30,8 @@
           </template>
         </div>
         <a :href="info.download_url" target="_blank" class="source">
-          <img v-if="info.source_img_url" :src="info.source_img_url" />
-          <span>资源来源于{{info.source_name}}</span>
+          <img v-if="source_img_url" :src="source_img_url" />
+          <span>资源来源于{{source_name}}</span>
         </a>
       </div>
       <ImgBox
@@ -60,7 +60,10 @@ export default {
   name:"DisplayBlock",
   props:{
     info:Object,
-    order:Number
+    order:Number,
+    source_name:String,
+    source_url:String,
+    source_img_url:String
   },
   data:function(){
     return {

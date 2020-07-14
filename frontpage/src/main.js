@@ -8,9 +8,9 @@ import preview from 'vue-photo-preview'
 import 'vue-photo-preview/dist/skin.css'
 
 import Search from "./components/Search.vue";
-import Content from "./components/Content.vue";
+// import Content from "./components/Content.vue";
 import Http404 from "./components/Http404.vue";
-import Test from "./components/Test.vue";
+import SourceOption from "./components/SourceOption.vue";
 
 Vue.use(animated);
 Vue.use(ViewUI);
@@ -33,14 +33,10 @@ const routes = [
     children:[
       {
         path:"/:content",
-        component:Content,
+        component:SourceOption,
         name:"content"
       }
     ]
-  },
-  {
-    path:"/test",
-    component:Test
   },
   {
     path:"*",

@@ -15,6 +15,7 @@ from novel_download import settings
 import threading
 from .essential import getInMemoryUploadedFile_bytes
 from config.config import redis_connect
+import copy
 
 from .models import SearchToken,SearchCache,DownloadCache
 
@@ -44,39 +45,54 @@ def get_token():
 
 # 返回格式
 # {
-#   "status":ERROR,
-#   "information":"未知错误"
-# }
-# {
-#   "status":SUCCESS,
-#   "result":{
-#     "empty":True,
-#     "url":"www.bingoz.cn"
-#   }
-# }
-# {
-#   "status":SUCCESS,
-#   "result":{
-#     "empty":False,
-#     "length":300,
-#     "end":True, # 或者False，看这次是否返回全部内容了
-#     "content":[
-#       {
-#         "name":"三国演义",
-#         "introduction":"巴拉巴拉",
-#         "download_url":"www.bingoz.cn",
-#         # 可以是[]或者没有这一项
-#         "imageList":[
-#           "www.bingoz.cn",
-#           "www.bingoz.cn"
-#         ],
-#         "source_name":"笔趣看",
-#         "source_url":"www.bingoz.cn",
-#         # 可以没有这一项
-#         "source_img_url":"www.bingoz.cn"
-#       }
-#     ]
-#   }
+#   status:0,
+#   result:[
+#     {
+#       source_name:"笔趣看",
+#       // 资源网站网址
+#       source_url:"www.baidu.com",
+#       // 网站图片网址，可以没有
+#       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png",
+#       // 表示搜索结果是否为空，如果为空，那么下面的内容都不需要
+#       status:0,
+#       empty:false,
+#       // 表示是否已经达到结束的地方
+#       end:false,
+#       // 表示搜索结果总数
+#       length:100,
+#       // 搜索的结果列表
+#       content:[
+#         {
+#           name:"三国演义",
+#           introduction:["三国演义"],
+#           // 源网页网址
+#           download_url:"www.baidu.com",
+#           imageList:[
+#             "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1592159453680&di=edb8f09c8fb193dbba6bde8dd6f24a6d&imgtype=0&src=http%3A%2F%2Fimage.gqjd.net%2Fimage%2F2009-12%2F72712457221.jpg",
+#             "http://image.gqjd.net/image/2009-12/57295513513.jpg"
+#           ]
+#         }
+#       ]
+#     },
+#     // 搜索为空的结果
+#     {
+#       source_name:"笔趣看",
+#       source_url:"www.biqukan.com",
+#       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png",
+#       status:0,
+#       empty:true,
+#       // 显示的福利图片网址
+#       url:"http://www.xinhuanet.com/video/2020-01/26/1210452637_15800000011261n.jpg"
+#     },
+#     // 搜索单项出现错误
+#     {
+#       source_name:"笔趣看",
+#       source_url:"www.baidu.com",
+#       source_img_url:"https://static.npmjs.com/58a19602036db1daee0d7863c94673a4.png",
+#       status:1,
+#       information:"出现错误"
+#     }
+#   ]
 # }
 def search(request):
   if request.method != "POST":
@@ -93,7 +109,7 @@ def search(request):
     })
   
   names = [x.strip() for x in name.strip().split(" ") if x.strip() != ""]
-  # 先看一下最近是否有搜索过类似的结果，如果没有那么再去下载
+  # 先看一下最近是否有搜索过相同的东西，如果没有那么再去下载
   content = get_exist_search_result(names)
   if not content:
     content = search_novel(names)
@@ -106,13 +122,18 @@ def search(request):
   if content == False:
     return JsonResponse({
       "status":ERROR,
-      "information":"服务器错误"
+      "information":"500错误"
     })
-  # 保存结果到搜索缓存中
-  save_search_result(names,content)
+  if type(content) != list and type(content) != tuple:
+    return JsonResponse({
+      "status":ERROR,
+      "information":"500错误"
+    })
 
   # 说明没有信息，直接返回
-  if (type(content) != list and type(content) != tuple) or len(content) <= 0:
+  if len(content) <= 0:
+    # 保存结果到搜索缓存中
+    save_search_result(names,content)
     length = len(image_list)
     order = math.floor(random.random() * length)
     return JsonResponse({
@@ -122,25 +143,47 @@ def search(request):
         "url":image_list[order]
       }
     })
-
-  content_return = content[:20]
-  content_save = content[20:]
+  
   # 如果返回数据超过20条那么就只返回20条然后将剩下的数据存储
+  save_content = []
+  # 是否保存结果到搜索缓存中，只要有一项是出现过错误的，我们就不保存
+  save_cache = True
+  content_cache = copy.deepcopy(content)
+  for index in range(len(content)):
+    # 如果下载有问题，那么直接下一条
+    if content[index]["status"] == ERROR:
+      save_cache = False
+      continue
+    content[index]["length"] = len(content[index]["content"])
+    # 如果搜索结果是空，那么需要附加一张随机福利图片
+    if content[index]["length"] <= 0:
+      content[index]["empty"] = True
+      length = len(image_list)
+      order = math.floor(random.random() * length)
+      content[index]["url"] = image_list[order]
+    else:
+      content[index]["empty"] = False
+    save = content[index]["content"][20:]
+    if save != []:
+      save_content.append({
+        "source_name":content[index]["source_name"],
+        "content":save
+      })
+      content[index]["end"] = False
+    else:
+      content[index]["end"] = True
+    content[index]["content"] = content[index]["content"][:20]
+  if save_cache:
+    save_search_result(names,content_cache)
   token = ""
-  if content_save != []:
+  if save_content != []:
     token = get_token()
-    data = json.dumps(content_save)
+    data = json.dumps(save_content)
     search_token = SearchToken(token=token,data=data)
     search_token.save()
-
   response = JsonResponse({
     "status":SUCCESS,
-    "result":{
-      "empty":False,
-      "end":content_save == [],
-      "length":len(content),
-      "content":content_return
-    }
+    "result":content
   })
   if token != "":
     max_age = 24*60*60
@@ -149,14 +192,11 @@ def search(request):
 
 # 返回格式
 # {
-#   "status":ERROR,
-#   "information":"巴拉巴拉"
-# }
-# {
 #   "status":SUCCESS,
 #   "result":{
-#     "end":True, # or False
-#     "content":[] # 格式与上面一样，如果没有了就是[]
+#     "source_name":"笔趣看",
+#     "content":[],
+#     "end":False
 #   }
 # }
 def search_more(request):
@@ -171,6 +211,12 @@ def search_more(request):
       "information":"没有更多信息"
     })
   token = request.COOKIES.get("novel_download_search_token")
+  name = request.POST.get("name")
+  if name == None:
+    return JsonResponse({
+      "status":ERROR,
+      "information":"请求信息不完整"
+    })
   try:
     search_token = SearchToken.objects.get(token=token)
   except SearchToken.DoesNotExist:
@@ -180,18 +226,30 @@ def search_more(request):
       "information":"没有更多信息"
     })
   content = json.loads(search_token.data)
-  content_return = content[:20]
-  content_save = content[20:]
+  for index in range(len(content)):
+    item = content[index]
+    if item["source_name"] == name:
+      result = {
+        "source_name":name,
+        "content":item["content"][:20]
+      }
+      item["content"] = item["content"][20:]
+      result["end"] = item["content"] == []
+      if item["content"] == []:
+        content.pop(index)
+      break
+  else:
+    return JsonResponse({
+      "status":ERROR,
+      "information":"{}没有更多信息".format(name)
+    })
   response = JsonResponse({
     "status":SUCCESS,
-    "result":{
-      "end":content_save == [],
-      "content":content_return
-    }
+    "result":result
   })
-  # 修改数据库，如果没有content_save了，那么删除数据库中信息以及cookies
-  if content_save != []:
-    search_token.data = json.dumps(content_save)
+  # 修改数据库，如果没有content了，那么删除数据库中信息以及cookies
+  if content != []:
+    search_token.data = json.dumps(content)
     search_token.save()
   else:
     search_token.delete()

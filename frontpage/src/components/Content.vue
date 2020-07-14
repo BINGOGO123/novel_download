@@ -34,6 +34,9 @@
       v-for="(item,index) in result.content"
       :key="index"
       :info="item"
+      :source_name="result.source_name"
+      :source_url="result.source_url"
+      :source_img_url="result.source_img_url"
       :order="index"
       ></DisplayBlock>
       <div class="display-block-end">
@@ -48,17 +51,17 @@
       <ImgDisplay :info="result">
       </ImgDisplay>
     </div>
-    <Spin size="large" fix v-if="searching"></Spin>
   </div>
 </template>
 
 <script>
 import DisplayBlock from "./DisplayBlock.vue";
 import ImgDisplay from "./ImgDisplay.vue";
+import config from "../config.json";
 
 export default {
   name:"Content",
-  props:["result","searchKey","searching","download_url"],
+  props:["result","searchKey","searching","active"],
   data:function(){
     return {
       loading:false,
@@ -79,12 +82,14 @@ export default {
       this.scrollFunc();
       // 是否已经处于底端
       if(this.getScrollTop() + this.getWindowHeight() == this.getScrollHeight())
-        // 除此之外还需要满足不在搜索状态，必须是有信息的展示页面，必须是往下滑，还有尚未加载的数据，不是正在加载中
-        if(!this.searching && this.displayType==1 && this.scrollDirection=="down" && this.result.end==false && !this.loading)
+        // 除此之外还需要满足当前content正在显示，不在搜索状态，必须是有信息的展示页面，必须是往下滑，还有尚未加载的数据，不是正在加载中
+        if(this.active && !this.searching && this.displayType==1 && this.scrollDirection=="down" && this.result.end==false && !this.loading)
         {
           this.loading = true;
+          // console.log(this.result);
+          // console.log(this.result.end);
           new Promise((resolve)=>{
-            this.$emit("getMore",resolve);
+            this.getMore(resolve,this.result.source_name);
           }).finally(()=>{
             this.loading=false;
           });
@@ -99,6 +104,8 @@ export default {
         return 0;
       else if(this.result instanceof Error)
         return String(this.result);
+      else if(this.result.status == config.error)
+        return this.result.information;
       else if(!this.result.empty)
         return 1;
       else
@@ -106,11 +113,6 @@ export default {
     }
   },
   methods:{
-    getMore:function(){
-      return new Promise(resolve => {
-        this.$emit("getMore",resolve);
-      });
-    },
     getScrollTop:function(){
       var scrollTop = 0, bodyScrollTop = 0, documentScrollTop = 0;
       if(document.body){
@@ -167,6 +169,9 @@ export default {
       this.scrollAction.y = window.pageYOffset;
     }
   },
+  inject:[
+    "getMore"
+  ],
   components:{
     DisplayBlock,
     ImgDisplay
