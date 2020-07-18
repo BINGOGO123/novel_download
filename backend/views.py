@@ -302,7 +302,8 @@ def downloaded(request):
   download_url = request.build_absolute_uri(settings.MEDIA_URL + download_cache.data.name)
   return JsonResponse({
     "status":SUCCESS,
-    "result":download_url
+    "result":download_url,
+    "name":download_cache.data.name
   })
 
 # 下载某个url的小说内容并存入数据库
@@ -310,17 +311,18 @@ def download(url):
   download_cache = DownloadCache(url=url,downloaded=False,download_error=False)
   download_cache.save()
   content= download_novel(url)
-  if (type(content) == list or type(content) == tuple) and len(content) > 1 and content[0] == False:
-    # 这种情况下说明有错误信息
+  if content["status"] == False:
+    information = content.get("information")
+    if information == None:
+      information = "下载过程出现未知错误"
     download_cache.download_error = True
-    download_cache.download_error_info = content[1]
-  elif content == False:
-    download_cache.download_error = True
+    download_cache.download_error_info = information
   else:
-    # 对下载到的内容采用utf8进行编码
-    name = content[1]
-    content = content[0]
-    data = content.encode("utf8")
+    name = content.get("name")
+    if type(content.get("content")) == str:
+      data = content.get("content").encode("utf8")
+    else:
+      data = content.get("content")
     pc_file = getInMemoryUploadedFile_bytes(data,name)
     download_cache.data = pc_file
   download_cache.downloaded = True

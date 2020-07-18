@@ -90,10 +90,72 @@ class Downloader:
     return_result["status"] = SUCCESS
     return_result["content"] = result
     return return_result
+  
+  # 下载爱下电子书网站小说目录
+  def download_catalog_aixdzs(self,names):
+    logger_spider.debug("download_catalog_aixiadianzishu names={}".format(names))
+    # 返回的结果
+    return_result = {
+      "source_name":"爱下电子书",
+      "source_url":"https://m.aixdzs.com/",
+      "source_img_url":"https://www.aixdzs.com/style/img/logo.jpg"
+    }
+    home_url = "https://m.aixdzs.com/search?k="
+    if type(names) == str:
+      download_url = home_url + names
+    elif type(names) == tuple or type(names) == list:
+      download_url = home_url + "+".join(names)
+    else:
+      logger_spider.error("download_catalog_aixiadianzishu names格式错误 names={}".format(names))
+      return_result["status"] = ERROR
+      return_result["information"] = "500错误"
+      return return_result
+    # 开始下载网页
+    response = self.download_html(download_url)
+    if response == False:
+      logger_spider.error("download_catalog_aixiadianzishu 搜索下载目录失败 url={}".format(download_url))
+      return_result["status"] = ERROR
+      return_result["information"] = "服务器爬虫请求失败"
+      return return_result
+    content = response.text
+    html = BeautifulSoup(content,"lxml")
+    lis = html.select(".ix-list li")
+    # 开始提取其中的内容
+    result = []
+    for li in lis:
+      item = {}
+      # 图片信息
+      img_div = li.select_one(".ix-list-img-square img")
+      img_url = img_div.attrs["src"]
+      # 这张图片的意思是暂无封面
+      if img_url != "https://img22.aixdzs.com/nopic2.jpg":
+        item["imageList"] = [img_url]
+      # 文字信息
+      info_div = li.select_one(".ix-list-info")
+      item["name"] = str(info_div.h3.a.string)
+      item["download_url"] = "https://m.aixdzs.com" + info_div.h3.a.attrs["href"]
+      introduction = []
+      author = info_div.select_one(".meta .meta-l a")
+      author_content = author.string
+      if author_content != None:
+        introduction.append("作者:" + str(author_content).strip())
+      article_type = info_div.select(".meta .meta-r em")
+      article_type_content = [str(x.string).strip() for x in article_type if x.string != None]
+      if article_type_content != []:
+        introduction.append(" ".join(article_type_content))
+      introduction_content = info_div.p.string
+      if introduction_content != None:
+        introduction.append("简介:" + str(introduction_content).strip())
+      item["introduction"] = introduction
+      result.append(item)
+    return_result["status"] = SUCCESS
+    return_result["content"] = result
+    return return_result
 
   # 下载所有网址小说目录
   def download_catalog_all(self,names):
-    return [self.download_catalog_biqukan(names)]
+    return [self.download_catalog_biqukan(names),self.download_catalog_aixdzs(names)]
+    # return [self.download_catalog_aixdzs(names)]
 
   # 判断一个网址应该用哪个下载器下载
   def judge_url(self,url):
@@ -102,6 +164,8 @@ class Downloader:
       return False
     if result[2] == "www.biqukan.com":
       return "biqukan"
+    elif result[2] == "m.aixdzs.com":
+      return "aixdzs"
     else:
       return False
 
@@ -111,14 +175,20 @@ class Downloader:
     judge_result = self.judge_url(url)
     if judge_result == False:
       logger_spider.error("download_novel url={} 该网址找不到下载器")
-      return False
+      return {
+        "status":False,
+        "information":"该网址找不到下载器"
+      }
     
     funname = "download_novel_" + judge_result
     try:
       download_fun = getattr(self,funname)
     except AttributeError:
       logger_spider.error("download_novel {}不存在".format(funname))
-      return False
+      return {
+        "status":False,
+        "information":"{}下载器不存在".format(funname)
+      }
     return download_fun(url)
 
   # 下载biqukan网站小说内容
@@ -126,13 +196,16 @@ class Downloader:
     logger_spider.debug("download_novel_biqukan url={}".format(url))
     response = self.download_html(url)
     if response == False:
-      logger_spider.exception("download_novel_biqukan 下载目录页面失败 url={}".format(url))
-      return False
+      logger_spider.exception("download_novel_biqukan 获取小说详细页面失败 url={}".format(url))
+      return {
+        "status":False,
+        "information":"获取小说详细页面失败"
+      }
     html = BeautifulSoup(response.content.decode("gbk","replace"),"lxml")
     # 名称
-    novel_name="biqukan小说"
+    novel_name="biqukan小说.txt"
     try:
-      novel_name = str(html.select_one(".info h2").string).strip() or novel_name
+      novel_name = str(html.select_one(".info h2").string).strip() + ".txt" or novel_name
     except:
       logger_spider.exception("download_novel_biqukan url={} name获取失败")
     # 内容
@@ -140,7 +213,10 @@ class Downloader:
     dt = block.find_all("dt")
     if len(dt) < 1:
       logger_spider.error("download_novel_biqukan block={} 未找到dt".format(block))
-      return False
+      return {
+        "status":False,
+        "information":"页面解析失败"
+      }
     dt = dt[-1]
     download_list = []
     for x in dt.next_siblings:
@@ -183,8 +259,71 @@ class Downloader:
           novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"异常因素，该章节下载失败，请联系416778940@qq.com","#" * 20)
     # 最后删掉url
     self.connect.delete(url)
-    return novel_contents,novel_name
+    return {
+      "status":True,
+      "content":novel_contents,
+      "name":novel_name
+    }
+  
+  # 下载爱下电子书网站小说内容
+  def download_novel_aixdzs(self,url):
+    logger_spider.debug("download_novel_aixdzs url={}".format(url))
+    response = self.download_html(url)
+    if response == False:
+      logger_spider.exception("download_novel_aixdzs 获取小说详细页面失败 url={}".format(url))
+      return {
+        "status":False,
+        "information":"获取小说详细页面失败"
+      }
+    html = BeautifulSoup(response.content,"lxml")
+    # 名称,这个网站下载格式应该都是zip，如果不是可能就会出现问题
+    novel_name="aixdzs小说.zip"
+    try:
+      novel_name_block = html.select_one(".ix-list-info h4")
+      if novel_name_block.string != None:
+        novel_name = str(novel_name_block.string).strip() + ".zip"
+    except:
+      logger_spider.exception("download_novel_aixdzs url={} name获取失败")
 
+    lis = html.select(".zipdown li")
+    download_url = False
+    if len(lis) < 0:
+      logger_spider.exception("download_novel_aixdzs .zipdown li 个数为0")
+      return {
+        "status":False,
+        "information":"没有下载链接"
+      }
+    elif len(lis) > 2:
+      download_li = lis[1]
+      li_content = "".join([str(x) for x in download_li.strings])
+      if "TXT下载" in li_content:
+        download_url = download_li.a.attrs["href"]
+    if download_url == False:
+      for li in lis:
+        li_content = "".join([str(x) for x in li.strings])
+        if "TXT下载" in li_content:
+          download_url = li.a.attrs["href"]
+          break
+    if download_url == False or download_url == None:
+      return {
+        "status":False,
+        "information":"download_url获取失败"
+      }
+    download_url = "https://m.aixdzs.com" + download_url
+    download_content = self.download_html(download_url)
+    if download_content == False:
+      logger_spider.error("download_novel_aixdzs 下载小说请求失败 url={}".format(download_url))
+      return {
+        "status":False,
+        "information":"下载小说请求失败"
+      }
+    return {
+      "status":True,
+      "content":download_content.content,
+      "name":novel_name
+    }
+
+  # 获取http返回信息
   def download_html(self,url):
     remain_count = self.__max_download_count
     while True:

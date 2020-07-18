@@ -398,7 +398,9 @@ export default {
             method:"GET",
             signal:operate_content.controller.signal
           }).then(res => res.blob()).then(blob => {
-            let filename = operate_content.name + ".txt";
+            // 文件名称根据返回的名称决定
+            // let filename = operate_content.name + ".txt";
+            let filename = json.name;
             let a = document.createElement('a');
             document.body.appendChild(a);
             let url = window.URL.createObjectURL(blob); 

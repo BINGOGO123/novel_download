@@ -44,7 +44,10 @@ def search_novel(names):
 def download_novel(url):
   # 如果下载已经满了，那么就算了
   if not operate_spider_count(1):
-    return False,"当前爬虫队列已满"
+    return {
+      "status":False,
+      "information":"当前爬虫队列已满"
+    }
   downloader = Downloader()
   content = downloader.download_novel(url)
   # 返回之前需要减回来
