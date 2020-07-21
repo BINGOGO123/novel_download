@@ -3,7 +3,8 @@ from bs4 import BeautifulSoup
 from config.logger import logger_spider
 from config.config import redis_connect
 import ipdb
-from config.config import SUCCESS,ERROR
+from config.config import SUCCESS,ERROR,download_process
+import sys
 
 class Downloader:
   __headers = {
@@ -25,9 +26,15 @@ class Downloader:
       download_fun = getattr(self,funname)
     except AttributeError:
       logger_spider.exception("download_catalog {}不存在".format(funname))
-      return False,"500错误"
+      return {
+        "status":False,
+        "information":"500错误"
+      }
     result = download_fun(names)
-    return result
+    return {
+      "status":True,
+      "result":result
+    }
 
   # 下载biqukan网站小说目录
   def download_catalog_biqukan(self,names):
@@ -66,33 +73,38 @@ class Downloader:
       item = {}
       if len(span) > 1:
         item["name"] = str(span[1].string).strip()
-        try:
-          item["download_url"] = span[1].a.attrs["href"]
-          response_novel = self.download_html(item["download_url"])
-          if response_novel == False:
-            raise Exception("下载小说详细页面失败 url={}".format(item["download_url"]))
-          novel_html = BeautifulSoup(response_novel.content.decode("gbk","replace"),"lxml")
-          img_url = "https://www.biqukan.com" + novel_html.select_one(".cover img").attrs["src"]
-          item["imageList"] = [img_url]
-          introduction = [x for x in novel_html.select_one(".intro").stripped_strings]
-          item["introduction"] = ["简介:" + str(introduction[1])]
-        except KeyError:
-          logger_spider.exception("download_catalog_biqukan book_name={} 没有href".format(item["name"]))
-        except:
-          logger_spider.exception("download_catalog_biqukan response_novel_error")
+        item["download_url"] = span[1].a.attrs["href"]
+        # 原来是会到详细页面爬取更多信息的，但是这样导致速度过慢，因此放弃
+        # try:
+        #   response_novel = self.download_html(item["download_url"])
+        #   if response_novel == False:
+        #     raise Exception("下载小说详细页面失败 url={}".format(item["download_url"]))
+        #   novel_html = BeautifulSoup(response_novel.content.decode("gbk","replace"),"lxml")
+        #   img_url = "https://www.biqukan.com" + novel_html.select_one(".cover img").attrs["src"]
+        #   item["imageList"] = [img_url]
+        #   introduction = [x for x in novel_html.select_one(".intro").stripped_strings]
+        #   item["introduction"] = ["简介:" + str(introduction[1])]
+        # except KeyError:
+        #   logger_spider.exception("download_catalog_biqukan book_name={} 没有href".format(item["name"]))
+        # except:
+        #   logger_spider.exception("download_catalog_biqukan response_novel_error")
       if len(span) > 2:
-        if item.get("introduction"):
-          item["introduction"] = ["作者:" + str(span[2].string).strip()] + item["introduction"]
-        else:
-          item["introduction"] = ["作者" + str(span[2].string).strip()]
+        item["introduction"] = ["作者:" + str(span[2].string).strip()]
+        # 注释原因同上
+        # if item.get("introduction"):
+        #   item["introduction"] = ["作者:" + str(span[2].string).strip()] + item["introduction"]
+        # else:
+        #   item["introduction"] = ["作者:" + str(span[2].string).strip()]
       if item != {}:
         result.append(item)
-    return_result["status"] = SUCCESS
+    # 总的元素数目
     return_result["content"] = result
+    return_result["length"] = len(return_result["content"])
+    return_result["status"] = SUCCESS
     return return_result
   
   # 下载爱下电子书网站小说目录
-  def download_catalog_aixdzs(self,names):
+  def download_catalog_aixdzs(self,names,page=None):
     logger_spider.debug("download_catalog_aixiadianzishu names={}".format(names))
     # 返回的结果
     return_result = {
@@ -110,6 +122,9 @@ class Downloader:
       return_result["status"] = ERROR
       return_result["information"] = "500错误"
       return return_result
+    # 目录的页数，默认是第一页
+    if page != None:
+      download_url += "&page={}".format(page)
     # 开始下载网页
     response = self.download_html(download_url)
     if response == False:
@@ -128,7 +143,8 @@ class Downloader:
       img_div = li.select_one(".ix-list-img-square img")
       img_url = img_div.attrs["src"]
       # 这张图片的意思是暂无封面
-      if img_url != "https://img22.aixdzs.com/nopic2.jpg":
+      abandon_img = ["https://img22.aixdzs.com/nopic2.jpg"]
+      if img_url not in abandon_img:
         item["imageList"] = [img_url]
       # 文字信息
       info_div = li.select_one(".ix-list-info")
@@ -148,6 +164,24 @@ class Downloader:
         introduction.append("简介:" + str(introduction_content).strip())
       item["introduction"] = introduction
       result.append(item)
+    # 获取后续页面
+    inputs = html.select("#page,#maxpage")
+    if inputs == [] or len(inputs) < 2:
+      return_result["length"] = len(result)
+    else:
+      present_page = int(inputs[0].attrs["value"])
+      max_page = int(inputs[1].attrs["value"])
+      if present_page >= max_page:
+        return_result["length"] = (max_page - 1) * 20 + len(result)
+      else:
+        return_result["length"] = str((max_page - 1) * 20) + "+"
+        return_result["pointer"] = {
+          "spider":sys._getframe().f_code.co_name,
+          "params":{
+            "names":names,
+            "page":present_page + 1
+          }
+        }
     return_result["status"] = SUCCESS
     return_result["content"] = result
     return return_result
@@ -238,7 +272,8 @@ class Downloader:
       logger_spider.debug("当前下载：{} 主页={} 章节={}".format(download_info["content"],url,download_info["url"]))
       # 每下载30章就向redis数据库中更新一次进度
       if index % 30 == 0:
-        self.connect.set(url,"{}/{}".format(index,length))
+        self.connect.hset(download_process,url,"{}/{}".format(index,length))
+        # self.connect.set(url,"{}/{}".format(index,length))
       response = self.download_html(download_info["url"])
       if response == False:
         logger_spider.exception("download_novel_biqukan 下载章节失败 url={}".format(download_info["url"]))
@@ -258,7 +293,8 @@ class Downloader:
           logger_spider.exception("download_novel_biqukan 使用beautifulsoup提取html信息失败")
           novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"异常因素，该章节下载失败，请联系416778940@qq.com","#" * 20)
     # 最后删掉url
-    self.connect.delete(url)
+    self.connect.hdel(download_process,url)
+    # self.connect.delete(url)
     return {
       "status":True,
       "content":novel_contents,
@@ -310,18 +346,24 @@ class Downloader:
         "information":"download_url获取失败"
       }
     download_url = "https://m.aixdzs.com" + download_url
-    download_content = self.download_html(download_url)
-    if download_content == False:
-      logger_spider.error("download_novel_aixdzs 下载小说请求失败 url={}".format(download_url))
-      return {
-        "status":False,
-        "information":"下载小说请求失败"
-      }
     return {
       "status":True,
-      "content":download_content.content,
+      "url":download_url,
       "name":novel_name
     }
+    # 将该文件下载到本地
+    # download_content = self.download_html(download_url)
+    # if download_content == False:
+    #   logger_spider.error("download_novel_aixdzs 下载小说请求失败 url={}".format(download_url))
+    #   return {
+    #     "status":False,
+    #     "information":"下载小说请求失败"
+    #   }
+    # return {
+    #   "status":True,
+    #   "content":download_content.content,
+    #   "name":novel_name
+    # }
 
   # 获取http返回信息
   def download_html(self,url):

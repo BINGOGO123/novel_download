@@ -37,7 +37,7 @@
       <ImgBox
       v-if="opened"
       :imageList="info.imageList"
-      :rawImage="false"
+      :rawImage="true"
       class="img-box"
       ></ImgBox>
     </div>

@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponse,JsonResponse
-from config.config import SUCCESS,ERROR
-from spider.spider import download_novel,search_novel
+from config.config import SUCCESS,ERROR,once_return_count,download_process
+from spider.spider import download_novel,search_novel,search_novel_more
 from config.logger import logger_backend
 from .image_list import image_list
 import random,math
@@ -113,26 +113,19 @@ def search(request):
   content = get_exist_search_result(names)
   if not content:
     content = search_novel(names)
-  if (type(content) == list or type(content) == tuple) and len(content) > 1 and content[0] == False:
-    # 这种情况下说明有错误信息
+  if content["status"] == False:
+    information = content.get("information") or "未知错误"
     return JsonResponse({
       "status":ERROR,
-      "information":content[1]
-    })
-  if content == False:
-    return JsonResponse({
-      "status":ERROR,
-      "information":"500错误"
-    })
-  if type(content) != list and type(content) != tuple:
-    return JsonResponse({
-      "status":ERROR,
-      "information":"500错误"
+      "information":information
     })
 
-  # 说明没有信息，直接返回
-  if len(content) <= 0:
-    # 保存结果到搜索缓存中
+  # 如果只是单个数据，依然先转换为列表进行处理
+  result = content["result"]
+  if type(result) == dict:
+    result = [result]
+  # 说明没有内容，并且也没有错误
+  if len(result) <= 0:
     save_search_result(names,content)
     length = len(image_list)
     order = math.floor(random.random() * length)
@@ -144,35 +137,41 @@ def search(request):
       }
     })
   
-  # 如果返回数据超过20条那么就只返回20条然后将剩下的数据存储
+  # 如果返回数据超过once_return_count条那么就只返回once_return_count条然后将剩下的数据存储
   save_content = []
   # 是否保存结果到搜索缓存中，只要有一项是出现过错误的，我们就不保存
   save_cache = True
   content_cache = copy.deepcopy(content)
-  for index in range(len(content)):
+  for index in range(len(result)):
     # 如果下载有问题，那么直接下一条
-    if content[index]["status"] == ERROR:
+    if result[index]["status"] == ERROR:
       save_cache = False
       continue
-    content[index]["length"] = len(content[index]["content"])
     # 如果搜索结果是空，那么需要附加一张随机福利图片
-    if content[index]["length"] <= 0:
-      content[index]["empty"] = True
+    if result[index]["length"] == 0:
+      result[index]["empty"] = True
       length = len(image_list)
       order = math.floor(random.random() * length)
-      content[index]["url"] = image_list[order]
+      result[index]["url"] = image_list[order]
+      continue
     else:
-      content[index]["empty"] = False
-    save = content[index]["content"][20:]
+      result[index]["empty"] = False
+    save = result[index]["content"][once_return_count:]
+    pointer = result[index].get("pointer")
+    saver = {}
+    if pointer != None:
+      saver["pointer"] = pointer
+      # 爬虫指示器不需要返回到前端去
+      del result[index]["pointer"]
     if save != []:
-      save_content.append({
-        "source_name":content[index]["source_name"],
-        "content":save
-      })
-      content[index]["end"] = False
+      saver["content"] = save
+    if saver != {}:
+      saver["source_name"] = result[index]["source_name"]
+      save_content.append(saver)
+      result[index]["end"] = False
     else:
-      content[index]["end"] = True
-    content[index]["content"] = content[index]["content"][:20]
+      result[index]["end"] = True
+    result[index]["content"] = result[index]["content"][:once_return_count]
   if save_cache:
     save_search_result(names,content_cache)
   token = ""
@@ -183,7 +182,7 @@ def search(request):
     search_token.save()
   response = JsonResponse({
     "status":SUCCESS,
-    "result":content
+    "result":result
   })
   if token != "":
     max_age = 24*60*60
@@ -226,17 +225,74 @@ def search_more(request):
       "information":"没有更多信息"
     })
   content = json.loads(search_token.data)
+  # 返回的内容
+  result = {
+    "source_name":name
+  }
   for index in range(len(content)):
     item = content[index]
     if item["source_name"] == name:
-      result = {
-        "source_name":name,
-        "content":item["content"][:20]
-      }
-      item["content"] = item["content"][20:]
-      result["end"] = item["content"] == []
-      if item["content"] == []:
+      pointer = item.get("pointer")
+      remain_content = item.get("content")
+      result_more = None
+      if remain_content == None or len(remain_content) == 0:
+        if pointer == None:
+          # 这种情况正常不会出现
+          logger_backend.error("search_more 无content和pointer source_name={}".format(item["source_name"]))
+          content.pop(index)
+          search_token.data = json.dumps(content)
+          search_token.save()
+          return JsonResponse({
+            "status":ERROR,
+            "information":"没有更多信息"
+          })
+        result_more = search_novel_more(pointer)
+      elif len(remain_content) < once_return_count:
+        if pointer != None:
+          result_more = search_novel_more(pointer)
+      if result_more != None:
+        if result_more["status"] == False:
+          # 如果没能进一步爬取更多信息，并且原来的内容是空，那么返回错误信息，此时数据库不需要进行修改
+          if remain_content == None or len(remain_content) == 0:
+            return JsonResponse({
+              "status":ERROR,
+              "information":result_more["information"]
+            })
+        else:
+          result_more_content = result_more["content"]
+          if result_more_content["status"] == ERROR:
+            # 如果没能进一步爬取更多信息，并且原来的内容是空，那么返回错误信息，此时数据库不需要进行修改
+            if remain_content == None or len(remain_content) == 0:
+              return JsonResponse({
+                "status":ERROR,
+                "information":result_more_content["information"]
+              })
+          else:
+            new_pointer = result_more_content.get("pointer")
+            new_content = result_more_content.get("content")
+            new_length = result_more_content.get("length")
+            if new_pointer == None:
+              del item["pointer"]
+            else:
+              item["pointer"] = new_pointer
+            if remain_content == None:
+              item["content"] = new_content
+            else:
+              item["content"] += new_content
+            remain_content = item["content"]
+            result["length"] = new_length
+      if remain_content == None:
+        result["content"] = []
+      else:
+        result["content"] = remain_content[:once_return_count]
+        item["content"] = remain_content[once_return_count:]
+        if len(item["content"]) == 0:
+          del item["content"]
+      if not item.get("content") and not item.get("pointer"):
         content.pop(index)
+        result["end"] = True
+      else:
+        result["end"] = False
       break
   else:
     return JsonResponse({
@@ -284,7 +340,7 @@ def downloaded(request):
     })
   connect = redis_connect.getConnect()
   if download_cache.downloaded == False:
-    percent = connect.get(url)
+    percent = connect.hget(download_process,url)
     if percent == None:
       percent = False
     return JsonResponse({
@@ -299,11 +355,20 @@ def downloaded(request):
       "status":ERROR,
       "information":information
     })
-  download_url = request.build_absolute_uri(settings.MEDIA_URL + download_cache.data.name)
+  data_url = download_cache.data_url
+  if data_url != None:
+    download_url = data_url
+    name = download_cache.data_name
+    open_page = True
+  else:
+    download_url = request.build_absolute_uri(settings.MEDIA_URL + download_cache.data.name)
+    name = download_cache.data.name
+    open_page = False
   return JsonResponse({
     "status":SUCCESS,
     "result":download_url,
-    "name":download_cache.data.name
+    "name":name,
+    "open_page":open_page
   })
 
 # 下载某个url的小说内容并存入数据库
@@ -319,11 +384,20 @@ def download(url):
     download_cache.download_error_info = information
   else:
     name = content.get("name")
-    if type(content.get("content")) == str:
-      data = content.get("content").encode("utf8")
+    data_content = content.get("content")
+    data_url = content.get("url")
+    if data_content != None:
+      if type(data_content) == str:
+        data = data_content.encode("utf8")
+      else:
+        data = data_content
+      pc_file = getInMemoryUploadedFile_bytes(data,name)
+      download_cache.data = pc_file
+    elif data_url != None:
+      download_cache.data_url = data_url
+      download_cache.data_name = name
     else:
-      data = content.get("content")
-    pc_file = getInMemoryUploadedFile_bytes(data,name)
-    download_cache.data = pc_file
+      download_cache.download_error = True
+      download_cache.download_error_info = "download_novel没有返回下载内容"
   download_cache.downloaded = True
   download_cache.save()

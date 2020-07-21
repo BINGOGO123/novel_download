@@ -63,8 +63,9 @@
         <!-- <Link class="link"/> -->
       </div>
     </transition>
-    <BackTop :bottom="0" :right="0">
-      <Icon type="ios-arrow-up" class="top"/>
+    <BackTop :bottom="0" :right="18">
+      <!-- <Icon type="ios-arrow-up" class="top"/> -->
+      <Icon type="md-arrow-round-up" class="top" size="20"/>
     </BackTop>
   </div>
 </template>
@@ -272,11 +273,14 @@ export default {
               if(this.result[i].source_name == json.result.source_name)
               {
                 this.result[i].end = json.result.end;
+                // 是否返回了新的总文件数目
+                if(json.result.length != undefined)
+                  this.result[i].length = json.result.length;
                 if(json.result.content.length > 0)
                   this.result[i].content = this.result[i].content.concat(json.result.content);
                 else
                   this.$Message.info({
-                    content:"已加载全部信息",
+                    content:"本次没有加载到信息",
                     duration:2
                   });
                 break;
@@ -293,11 +297,14 @@ export default {
           else
           {
             this.result.end = json.result.end;
+            // 是否返回了新的总文件数目
+            if(json.result.length != undefined)
+              this.result.length = json.result.length;
             if(json.result.content.length > 0)
               this.result.content = this.result.content.concat(json.result.content);
             else
               this.$Message.info({
-                content:"已加载全部信息",
+                content:"本次没有加载到信息",
                 duration:2
               });
           }
@@ -393,32 +400,10 @@ export default {
         }
         else {
           let url = json.result;
-          operate_content.controller = new AbortController();
-          fetch(url,{
-            method:"GET",
-            signal:operate_content.controller.signal
-          }).then(res => res.blob()).then(blob => {
-            // 文件名称根据返回的名称决定
-            // let filename = operate_content.name + ".txt";
-            let filename = json.name;
-            let a = document.createElement('a');
-            document.body.appendChild(a);
-            let url = window.URL.createObjectURL(blob); 
-            a.href = url;
-            a.download = filename;
-            a.target = "_blank";
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-          }).catch(error => {
-            // 如果是手动终止，那么不会发生任何事情
-            if(error instanceof DOMException)
-              return;
-            this.$Message.error({
-              content:"下载失败:" + error,
-              duration:2
-            });
-          }).finally(() => {
+          let open_page = json.open_page;
+          if(open_page)
+          {
+            window.open(url);
             if(operate_content.reduce_time_out != undefined)
             {
               clearTimeout(operate_content.reduce_time_out);
@@ -426,8 +411,45 @@ export default {
             }
             this.$set(operate_content,"downloading",false);
             this.$set(operate_content,"process",undefined);
-            operate_content.controller = undefined;
-          });
+          }
+          else
+          {
+            operate_content.controller = new AbortController();
+            fetch(url,{
+              method:"GET",
+              signal:operate_content.controller.signal
+            }).then(res => res.blob()).then(blob => {
+              // 文件名称根据返回的名称决定
+              // let filename = operate_content.name + ".txt";
+              let filename = json.name;
+              let a = document.createElement('a');
+              document.body.appendChild(a);
+              let url = window.URL.createObjectURL(blob); 
+              a.href = url;
+              a.download = filename;
+              a.target = "_blank";
+              a.click();
+              a.remove();
+              window.URL.revokeObjectURL(url);
+            }).catch(error => {
+              // 如果是手动终止，那么不会发生任何事情
+              if(error instanceof DOMException)
+                return;
+              this.$Message.error({
+                content:"下载失败:" + error,
+                duration:2
+              });
+            }).finally(() => {
+              if(operate_content.reduce_time_out != undefined)
+              {
+                clearTimeout(operate_content.reduce_time_out);
+                operate_content.reduce_time_out = null;
+              }
+              this.$set(operate_content,"downloading",false);
+              this.$set(operate_content,"process",undefined);
+              operate_content.controller = undefined;
+            });
+          }
         }
       }).catch(error => {
         // 如果是手动终止，那么不会发生任何事情
@@ -728,14 +750,16 @@ $small-white:rgb(255, 255, 255);
 {
   color:white;
   background-color:rgba(211, 98, 22, 0.8);
-  width:50px;
-  height:50px;
-  display:flex;
-  flex-direction: row;
-  justify-self: center;
-  align-items: center;
+  width:30px;
+  height:40px;
+  // display:flex;
+  // flex-direction: row;
+  // justify-self: center;
+  // align-items: center;
   box-shadow:0 0 3px rgba(248, 128, 49,0.6);
   border-radius:25px 25px 0 25px;
+  border-radius:25px 25px 0 0;
+  padding-left:5px;
 }
 .top:hover
 {

@@ -265,10 +265,6 @@ export default {
   {
     color:rgb(43, 117, 255);
   }
-  .number
-  {
-    // font-weight:bold;
-  }
   .loading,.blue
   {
     color:rgb(43, 117, 255);
