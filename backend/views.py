@@ -121,9 +121,9 @@ def search(request):
     })
 
   # 如果只是单个数据，依然先转换为列表进行处理
+  if type(content["result"]) == dict:
+    content["result"] = [content["result"]]
   result = content["result"]
-  if type(result) == dict:
-    result = [result]
   # 说明没有内容，并且也没有错误
   if len(result) <= 0:
     save_search_result(names,content)
@@ -141,6 +141,8 @@ def search(request):
   save_content = []
   # 是否保存结果到搜索缓存中，只要有一项是出现过错误的，我们就不保存
   save_cache = True
+  # 记录其中没有内容的源在result中的位置
+  empty_content = []
   content_cache = copy.deepcopy(content)
   for index in range(len(result)):
     # 如果下载有问题，那么直接下一条
@@ -149,10 +151,11 @@ def search(request):
       continue
     # 如果搜索结果是空，那么需要附加一张随机福利图片
     if result[index]["length"] == 0:
-      result[index]["empty"] = True
-      length = len(image_list)
-      order = math.floor(random.random() * length)
-      result[index]["url"] = image_list[order]
+      # result[index]["empty"] = True
+      # length = len(image_list)
+      # order = math.floor(random.random() * length)
+      # result[index]["url"] = image_list[order]
+      empty_content.append(index)
       continue
     else:
       result[index]["empty"] = False
@@ -172,18 +175,34 @@ def search(request):
     else:
       result[index]["end"] = True
     result[index]["content"] = result[index]["content"][:once_return_count]
+  # 将内容为空的网站源从result中删除
+  if len(empty_content) > 0:
+    result = [result[x] for x in range(len(result)) if x not in empty_content]
+    content_cache["result"] = [content_cache["result"][x] for x in range(len(content_cache["result"])) if x not in empty_content]
   if save_cache:
     save_search_result(names,content_cache)
+  # 说明result中所有网站源都是空的
+  if len(result) <= 0:
+    length = len(image_list)
+    order = math.floor(random.random() * length)
+    response = JsonResponse({
+      "status":SUCCESS,
+      "result":{
+        "empty":True,
+        "url":image_list[order]
+      }
+    })
+  else:
+    response = JsonResponse({
+      "status":SUCCESS,
+      "result":result
+    })
   token = ""
   if save_content != []:
     token = get_token()
     data = json.dumps(save_content)
     search_token = SearchToken(token=token,data=data)
     search_token.save()
-  response = JsonResponse({
-    "status":SUCCESS,
-    "result":result
-  })
   if token != "":
     max_age = 24*60*60
     response.set_cookie("novel_download_search_token",token,max_age=max_age)
@@ -340,13 +359,23 @@ def downloaded(request):
     })
   connect = redis_connect.getConnect()
   if download_cache.downloaded == False:
-    percent = connect.hget(download_process,url)
-    if percent == None:
-      percent = False
-    return JsonResponse({
-      "status":SUCCESS,
-      "percent":percent
-    })
+    redis_item = connect.hget(download_process,url)
+    if redis_item == None:
+      return JsonResponse({
+        "status":SUCCESS,
+        "percent":False
+      })
+    else:
+      redis_item = json.loads(redis_item)
+      percent = redis_item.get("percent") or False
+      detail = redis_item.get("detail")
+      return_response = {
+        "status":SUCCESS,
+        "percent":percent
+      }
+      if detail:
+        return_response["detail"] = detail
+      return JsonResponse(return_response)
   # 如果download_error=True，那么查询完成之后立刻删除这条记录，也就是下次下载会重新开始而不是直接判定为下载失败
   if download_cache.download_error == True:
     information = download_cache.download_error_info if download_cache.download_error_info != None else "下载出现错误"
@@ -364,12 +393,16 @@ def downloaded(request):
     download_url = request.build_absolute_uri(settings.MEDIA_URL + download_cache.data.name)
     name = download_cache.data.name
     open_page = False
-  return JsonResponse({
+  return_response = {
     "status":SUCCESS,
     "result":download_url,
     "name":name,
     "open_page":open_page
-  })
+  }
+  data_detail = download_cache.data_detail
+  if data_detail != None:
+    return_response["detail"] = json.loads(data_detail)
+  return JsonResponse(return_response)
 
 # 下载某个url的小说内容并存入数据库
 def download(url):
@@ -386,6 +419,7 @@ def download(url):
     name = content.get("name")
     data_content = content.get("content")
     data_url = content.get("url")
+    data_detail = content.get("detail")
     if data_content != None:
       if type(data_content) == str:
         data = data_content.encode("utf8")
@@ -399,5 +433,7 @@ def download(url):
     else:
       download_cache.download_error = True
       download_cache.download_error_info = "download_novel没有返回下载内容"
+    if data_detail != None:
+      download_cache.data_detail = json.dumps(data_detail)
   download_cache.downloaded = True
   download_cache.save()

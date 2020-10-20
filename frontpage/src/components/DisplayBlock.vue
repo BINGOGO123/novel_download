@@ -30,12 +30,17 @@
           </template>
         </div>
         <a :href="info.download_url" target="_blank" class="source">
-          <img v-if="source_img_url" :src="source_img_url" />
-          <span>资源来源于{{source_name}}</span>
+          <template v-if="source_img_url">
+            <span>查看源页面</span>
+            <img :src="source_img_url" />
+          </template>
+          <template v-else>
+            <span>查看源页面->{{source_name}}</span>
+          </template>
         </a>
       </div>
       <ImgBox
-      v-if="opened"
+      v-if="info.imageList&&opened"
       :imageList="info.imageList"
       :rawImage="true"
       class="img-box"
@@ -96,6 +101,14 @@ export default {
         return "999+"
       return String(this.order + 1)
     }
+  },
+  watch:{
+    // 只要是传过来的信息发生了改变，那么就会初始化该组件的信息
+    // 这里说明了一个问题，watch的检测机制，检查的是某个变量的值是否改变，对于对象来说，内容怎么改变都不会触发watch，但是一旦地址改变即使内容相同依然会触发watch函数
+    info:function(){
+      this.opened=false;
+    }
+    // 这里理论上来说应该info order source_name source_url source_img_url发生改变之后都要初始化变量，但是本应用不需要所以这里就不写了
   },
   components:{
     ImgBox
@@ -249,7 +262,7 @@ export default {
   padding:6px 10px 6px 10px;
   margin:10px 0 0 0;
   border-radius:4px;
-  max-height:150px;
+  // max-height:150px;
   font-family: "Verdana",youyuan;
 
   .source
@@ -261,7 +274,8 @@ export default {
     img
     {
       // width:18px;
-      height:18px;
+      height:24px;
+      margin-top:2px;
       margin-right:3px;
       // box-shadow:0 0 1px rgb(92, 92, 92);
     }

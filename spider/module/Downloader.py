@@ -5,6 +5,8 @@ from config.config import redis_connect
 import ipdb
 from config.config import SUCCESS,ERROR,download_process
 import sys
+import json
+import re
 
 class Downloader:
   __headers = {
@@ -105,7 +107,7 @@ class Downloader:
   
   # 下载爱下电子书网站小说目录
   def download_catalog_aixdzs(self,names,page=None):
-    logger_spider.debug("download_catalog_aixiadianzishu names={}".format(names))
+    logger_spider.debug("download_catalog_aixdzs names={} page={}".format(names,page))
     # 返回的结果
     return_result = {
       "source_name":"爱下电子书",
@@ -118,7 +120,7 @@ class Downloader:
     elif type(names) == tuple or type(names) == list:
       download_url = home_url + "+".join(names)
     else:
-      logger_spider.error("download_catalog_aixiadianzishu names格式错误 names={}".format(names))
+      logger_spider.error("download_catalog_aixdzs names格式错误 names={}".format(names))
       return_result["status"] = ERROR
       return_result["information"] = "500错误"
       return return_result
@@ -128,7 +130,7 @@ class Downloader:
     # 开始下载网页
     response = self.download_html(download_url)
     if response == False:
-      logger_spider.error("download_catalog_aixiadianzishu 搜索下载目录失败 url={}".format(download_url))
+      logger_spider.error("download_catalog_aixdzs 搜索下载目录失败 url={}".format(download_url))
       return_result["status"] = ERROR
       return_result["information"] = "服务器爬虫请求失败"
       return return_result
@@ -185,10 +187,126 @@ class Downloader:
     return_result["status"] = SUCCESS
     return_result["content"] = result
     return return_result
+  
+  # 下载哔哩轻小说网站小说目录
+  def download_catalog_linovelib(self,names=None,url=None):
+    logger_spider.debug("download_catalog_linovelib names={} url={}".format(names,url))
+    # 返回的结果
+    return_result = {
+      "source_name":"哔哩轻小说",
+      "source_url":"https://www.linovelib.com/",
+      "source_img_url":"https://www.linovelib.com/images/logo.png"
+    }
+    home_url = "https://www.linovelib.com/s/"
+    # 说明是首次搜索
+    if url == None:
+      post_data = {
+        "searchtype":"all"
+      }
+      if type(names) == str:
+        post_data["searchkey"] = names
+      elif type(names) == tuple or type(names) == list:
+        post_data["searchkey"] = " ".join(names)
+      else:
+        logger_spider.error("download_catalog_linovelib names格式错误 names={}".format(names))
+        return_result["status"] = ERROR
+        return_result["information"] = "500错误"
+        return return_result
+      request_params = {
+        "url":home_url,
+        "method":"POST",
+        "data":post_data
+      }
+    # 说明不是首次搜索，而是接下来的页面
+    else:
+      request_params = {
+        "url":url,
+        "method":"GET"
+      }
+    # 开始下载网页
+    response = self.download_html(**request_params)
+    if response == False:
+      logger_spider.error("download_catalog_linovelib 搜索下载目录失败 request_params={}".format(request_params))
+      return_result["status"] = ERROR
+      return_result["information"] = "服务器爬虫请求失败"
+      return return_result
+    content = response.text
+    html = BeautifulSoup(content,"lxml")
+    # 说明搜索出来不止一条结果
+    if len(response.history) <= 0:
+      lis = html.select(".search-result-list")
+      # 开始提取其中的内容
+      result = []
+      for li in lis:
+        item = {}
+        try:
+          item["download_url"] = "https://www.linovelib.com" + li.select_one(".imgbox a").attrs["href"]
+          item["download_url"] = ".".join(item["download_url"].split(".")[:-1]) + "/catalog"
+          item["imageList"] = [li.select_one(".imgbox a img").attrs["src"]]
+          item["name"] = str(li.select_one("h2.tit a").string).strip()
+          item["introduction"] = []
+          bookinfo = li.select_one(".bookinfo")
+          bookinfo_list = [str(x) for x in bookinfo.stripped_strings]
+          if len(bookinfo_list) >= 1 and bookinfo_list[-1] == "万":
+            bookinfo_list = bookinfo_list[:-1]
+          bookinfo_list = [x for x in bookinfo_list if x != "|"]
+          bookinfo_str = " ".join(bookinfo_list)
+          regular = re.compile(r"""towan\('(\d*)'\)""")
+          bookinfo_result = re.sub(regular,r"\1",bookinfo_str)
+          if bookinfo_result != "":
+            item["introduction"].append(bookinfo_result)
+          key_word = li.select_one(".key-word").string
+          if key_word != None:
+            item["introduction"].append("关键词:" + str(key_word).strip())
+          introduction = li.p.string
+          if introduction != None:
+            item["introduction"].append("简介:" + str(introduction).strip())
+        except:
+          logger_spider.exception("download_catalog_linovelib 网页解析错误 url={}".format(response.url))
+        if item != {}:
+          result.append(item)
+      # 获取之后待爬取的页面
+      try:
+        next_page = html.select_one(".next")
+        last_page = int(html.select_one(".last").string)
+        # present_page = int(html.select_one(".pagelink strong").string)
+      except:
+        return_result["length"] = len(result)
+      else:
+        if next_page == None:
+          return_result["length"] = (last_page - 1) * 20 + len(result)
+        else:
+          next_url = "https://www.linovelib.com" + next_page.attrs["href"]
+          return_result["pointer"] = {
+            "spider":sys._getframe().f_code.co_name,
+            "params":{
+              "url":next_url
+            }
+          }
+          return_result["length"] = "{}+".format((last_page - 1) * 20)
+    # 被重定向到了具体页面，说明只有一条结果
+    else:
+      result = []
+      item = {}
+      try:
+        item["imageList"] = [html.select_one(".book-img img").attrs["src"]]
+        item["download_url"] = "https://www.linovelib.com" + html.select_one(".btn-group .read-btn").attrs["href"]
+        item["name"] = str(html.select_one(".book-name").string).strip()
+        item["introduction"] = []
+        item["introduction"].append(" ".join([x for x in html.select_one(".book-label").stripped_strings]))
+        item["introduction"].append("简介:" + "\n".join([x for x in html.select_one(".book-dec").stripped_strings]))
+      except:
+        logger_spider.exception("download_catalog_linovelib 网页解析错误 url={}".format(response.url))
+      if item != {}:
+        result.append(item)
+      return_result["length"] = len(result)
+    return_result["content"] = result
+    return_result["status"] = SUCCESS
+    return return_result
 
   # 下载所有网址小说目录
   def download_catalog_all(self,names):
-    return [self.download_catalog_biqukan(names),self.download_catalog_aixdzs(names)]
+    return [self.download_catalog_biqukan(names),self.download_catalog_aixdzs(names),self.download_catalog_linovelib(names)]
     # return [self.download_catalog_aixdzs(names)]
 
   # 判断一个网址应该用哪个下载器下载
@@ -200,6 +318,8 @@ class Downloader:
       return "biqukan"
     elif result[2] == "m.aixdzs.com":
       return "aixdzs"
+    elif result[2] == "www.linovelib.com":
+      return "linovelib"
     else:
       return False
 
@@ -208,7 +328,7 @@ class Downloader:
     logger_spider.debug("download_novel url={}".format(url))
     judge_result = self.judge_url(url)
     if judge_result == False:
-      logger_spider.error("download_novel url={} 该网址找不到下载器")
+      logger_spider.error("download_novel url={} 该网址找不到下载器".format(url))
       return {
         "status":False,
         "information":"该网址找不到下载器"
@@ -242,7 +362,15 @@ class Downloader:
       novel_name = str(html.select_one(".info h2").string).strip() + ".txt" or novel_name
     except:
       logger_spider.exception("download_novel_biqukan url={} name获取失败")
-    # 内容
+    # 先获取小说的一些详细信息
+    redis_item = {}
+    detail = {}
+    detail["imageList"] = ["https://www.biqukan.com" + html.select_one(".cover img").attrs["src"]]
+    introduction = [x for x in html.select_one(".intro").stripped_strings]
+    detail["introduction"] = ["简介:" + str(introduction[1])]
+    redis_item["detail"] = detail
+    self.connect.hset(download_process,url,json.dumps(redis_item))
+    # 内容下载
     block = html.select_one(".listmain")
     dt = block.find_all("dt")
     if len(dt) < 1:
@@ -272,7 +400,16 @@ class Downloader:
       logger_spider.debug("当前下载：{} 主页={} 章节={}".format(download_info["content"],url,download_info["url"]))
       # 每下载30章就向redis数据库中更新一次进度
       if index % 30 == 0:
-        self.connect.hset(download_process,url,"{}/{}".format(index,length))
+        redis_item = self.connect.hget(download_process,url)
+        if redis_item == None:
+          redis_item = {}
+        else:
+          redis_item = json.loads(redis_item)
+        # 大约还要等待的时间，假设每章的时间为0.3s，取整
+        redis_item["percent"] = int((length - index) * 0.3)
+        redis_item["progress"] = "{}/{}".format(index,length)
+        self.connect.hset(download_process,url,json.dumps(redis_item))
+        # self.connect.hset(download_process,url,"{}/{}".format(index,length))
         # self.connect.set(url,"{}/{}".format(index,length))
       response = self.download_html(download_info["url"])
       if response == False:
@@ -292,14 +429,20 @@ class Downloader:
         except:
           logger_spider.exception("download_novel_biqukan 使用beautifulsoup提取html信息失败")
           novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"异常因素，该章节下载失败，请联系416778940@qq.com","#" * 20)
-    # 最后删掉url
+    # 最后先获取详细信息，然后删掉url
+    redis_item = self.connect.hget(download_process,url)
     self.connect.hdel(download_process,url)
     # self.connect.delete(url)
-    return {
+    return_result = {
       "status":True,
       "content":novel_contents,
       "name":novel_name
     }
+    if redis_item != None:
+      redis_item = json.loads(redis_item)
+      if redis_item.get("detail"):
+        return_result["detail"] = redis_item["detail"]
+    return return_result
   
   # 下载爱下电子书网站小说内容
   def download_novel_aixdzs(self,url):
@@ -365,12 +508,79 @@ class Downloader:
     #   "name":novel_name
     # }
 
+  # 下载bili轻小说网站小说内容
+  def download_novel_linovelib(self,url):
+    logger_spider.debug("download_novel_linovelib url={}".format(url))
+    response = self.download_html(url)
+    if response == False:
+      logger_spider.exception("download_novel_linovelib 获取小说详细页面失败 url={}".format(url))
+      return {
+        "status":False,
+        "information":"获取小说详细页面失败"
+      }
+    html = BeautifulSoup(response.text,"lxml")
+    # 名称
+    novel_name="linovelib小说.txt"
+    try:
+      novel_name = str(html.select_one(".book-meta h1").string).strip() + ".txt" or novel_name
+    except:
+      logger_spider.exception("download_novel_linovelib url={} name获取失败")
+    # 内容下载
+    lias = html.select(".chapter-list li a,.chapter-list div")
+    download_list = [{"content":str(lia.string).strip(),"url":"https://www.linovelib.com" + lia.attrs["href"]} if lia.name.lower() == "a" else "\n".join([x for x in lia.stripped_strings]) for lia in lias]
+
+    novel_contents = ""
+    length = len(download_list)
+    # 准备每章节进行下载
+    for index in range(length):
+      # 每下载30章就向redis数据库中更新一次进度
+      if index % 30 == 0:
+        redis_item = self.connect.hget(download_process,url)
+        if redis_item == None:
+          redis_item = {}
+        else:
+          redis_item = json.loads(redis_item)
+        # 大约还要等待的时间，假设每章的时间为0.3s，取整
+        redis_item["percent"] = int((length - index) * 0.3)
+        redis_item["progress"] = "{}/{}".format(index,length)
+        self.connect.hset(download_process,url,json.dumps(redis_item))
+        # self.connect.hset(download_process,url,"{}/{}".format(index,length))
+        # self.connect.set(url,"{}/{}".format(index,length))
+      download_info = download_list[index]
+      if type(download_info) == str:
+        novel_contents = novel_contents + "《" + download_info + "》" + "\n\n"
+        continue
+      logger_spider.debug("当前下载：{} 主页={} 章节={}".format(download_info["content"],url,download_info["url"]))
+      response = self.download_html(download_info["url"])
+      if response == False:
+        logger_spider.exception("download_novel_linovelib 下载章节失败 url={}".format(download_info["url"]))
+        # 下载失败，那么在明文中做出标记
+        novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"因为不可控因素，该章节下载失败，敬请谅解","#" * 20)
+      else:
+        try:
+          html = BeautifulSoup(response.text,"lxml")
+          content_p = html.select("#TextContent > p")
+          contents = "\n".join([str(p.string).strip() for p in content_p])
+          novel_contents = novel_contents + download_info["content"] + "\n" + contents + "\n\n"
+        except:
+          logger_spider.exception("download_novel_linovelib 使用beautifulsoup提取html信息失败")
+          novel_contents += "{}\n{}\n{}\n{}\n\n".format("#" * 20,download_info["content"],"异常因素，该章节下载失败，请联系416778940@qq.com","#" * 20)
+    # 最后删掉url
+    self.connect.hdel(download_process,url)
+    # self.connect.delete(url)
+    return_result = {
+      "status":True,
+      "content":novel_contents,
+      "name":novel_name
+    }
+    return return_result
+
   # 获取http返回信息
-  def download_html(self,url):
+  def download_html(self,url,method="GET",**kwargs):
     remain_count = self.__max_download_count
     while True:
       try:
-        res = self.s.get(url,timeout=self.__timeout)
+        res = self.s.request(method,url,timeout=self.__timeout,**kwargs)
         res.raise_for_status()
         return res
       except:

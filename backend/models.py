@@ -28,6 +28,8 @@ class DownloadCache(models.Model):
   data_url = models.TextField(null=True,blank=True)
   # 文件名称，当没有下载到服务器时，文件名称就这样保存
   data_name = models.TextField(null=True,blank=True)
+  # 详情信息，该下载页面的详情信息，json字符串，可以无
+  data_detail = models.TextField(null=True,blank=True)
   # 标记文件是否已经下载完成
   downloaded = models.BooleanField(default=False)
   # 标记是否出现错误

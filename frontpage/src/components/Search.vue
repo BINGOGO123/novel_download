@@ -63,7 +63,7 @@
         <!-- <Link class="link"/> -->
       </div>
     </transition>
-    <BackTop :bottom="0" :right="18">
+    <BackTop :bottom="0" :right="14">
       <!-- <Icon type="ios-arrow-up" class="top"/> -->
       <Icon type="md-arrow-round-up" class="top" size="20"/>
     </BackTop>
@@ -353,13 +353,9 @@ export default {
         operate_content = this.result.content[order];
       this.$set(operate_content,"downloading",true);
       this.download_file(operate_content);
-      // this.$set(this.result.content[order],"downloading",true);
-      // this.download_file(order);
     },
     download_file:function(operate_content){
       let formData = new FormData();
-      // formData.append("url",this.result.content[order].download_url);
-      // this.result.content[order].controller = new AbortController();
       formData.append("url",operate_content.download_url);
       operate_content.controller = new AbortController();
       let promise = new Promise((resolve,reject) => {
@@ -377,26 +373,40 @@ export default {
         });
       });
       promise.then(json => {
+        // 是否有更多的信息
+        if(json.detail != undefined && operate_content.updated != true)
+        {
+          for(let x in json.detail)
+            if(json.detail[x] instanceof Array && operate_content[x] instanceof Array)
+              this.$set(operate_content,x,operate_content[x].concat(json.detail[x]))
+            else
+              // operate_content[x] = json.detail[x]
+              this.$set(operate_content,x,json.detail[x])
+          // 表示这一项已经更新过信息，之后再次下载将不会再次更新
+          operate_content.updated = true;
+        }
         // 如果没有返回进度，那么1s之后再次询问
         if(json.percent == false) {
           operate_content.download_timeout = setTimeout(()=>{
             this.download_file(operate_content);
           },1000);
         }
-        else if(typeof(json.percent)=="string") {
+        else if(typeof(json.percent)=="string"||typeof(json.percent)=="number") {
           // 这里假设0.25s的时间爬取一章
-          let time_node = json.percent.split("/");
-          let time_interval = (Number(time_node[1]) - Number(time_node[0])) * 250;
+          // let time_node = json.percent.split("/");
+          // let time_interval = (Number(time_node[1]) - Number(time_node[0])) * 250;
           if(operate_content.reduce_time_out != undefined)
           {
             clearTimeout(operate_content.reduce_time_out);
             operate_content.reduce_time_out = null;
           }
-          this.$set(operate_content,"process",Math.ceil((Number(time_node[1]) - Number(time_node[0]))*0.3));
+          // this.$set(operate_content,"process",Math.ceil((Number(time_node[1]) - Number(time_node[0]))*0.3));
+          this.$set(operate_content,"process",Number(json.percent));
           this.reduce_process(operate_content);
+          // 下次询问要比显示给用户的时间提前1s
           operate_content.download_timeout = setTimeout(()=>{
             this.download_file(operate_content)
-          },time_interval);
+          },Number(json.percent - 1 > 0 ?  json.percent - 1 : json.percent) * 1000);
         }
         else {
           let url = json.result;
@@ -475,7 +485,7 @@ export default {
         return;
       if(operate_content.process <= 1)
       {
-        // 先清除一下
+        // 清除一下，不再定时减少
         operate_content.reduce_time_out = undefined;
         return;
       }
@@ -661,6 +671,7 @@ $small-white:rgb(255, 255, 255);
   // position:absolute;
   // top:0;
   // left:0;
+  z-index:10;
   width:100%;
   box-shadow:0 0 3px rgb(200,200,200);
   box-shadow:0 0 6px #bbbedb;
@@ -750,8 +761,8 @@ $small-white:rgb(255, 255, 255);
 {
   color:white;
   background-color:rgba(211, 98, 22, 0.8);
-  width:30px;
-  height:40px;
+  width:34px;
+  height:35px;
   // display:flex;
   // flex-direction: row;
   // justify-self: center;
@@ -759,7 +770,7 @@ $small-white:rgb(255, 255, 255);
   box-shadow:0 0 3px rgba(248, 128, 49,0.6);
   border-radius:25px 25px 0 25px;
   border-radius:25px 25px 0 0;
-  padding-left:5px;
+  padding-left:7px;
 }
 .top:hover
 {

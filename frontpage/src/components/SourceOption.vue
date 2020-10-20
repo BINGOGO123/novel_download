@@ -44,6 +44,45 @@ export default {
       order:0
     }
   },
+  methods:{
+    getSourceName:function(result){
+      if(result == null)
+        return null;
+      else if((typeof(result) == "string") || (result instanceof Error))
+        return null;
+      else if(result instanceof Array)
+      {
+        return result.map(value => {
+          return value.source_name;
+        });
+      }
+      else
+      {
+        if(result.source_name != undefined)
+          return result.source_name;
+        else
+          return null;
+      }
+    }
+  },
+  watch:{
+    result:function(new_result,old_result){
+      let old_source_name = this.getSourceName(old_result);
+      let new_source_name = this.getSourceName(new_result);
+      // 两方有一方没有source_name，那么order调整为0
+      if(old_source_name == null || new_source_name == null)
+        this.order = 0;
+      // 新方是单项，那么order调整为0
+      else if(!(new_source_name instanceof Array))
+        this.order = 0;
+      else {
+        if(old_source_name instanceof Array)
+          old_source_name = old_source_name[this.order];
+        let new_order = new_source_name.indexOf(old_source_name);
+        this.order = new_order >=0 ? new_order : 0;
+      }
+    }
+  },
   components:{
     Content
   }
